@@ -1,0 +1,106 @@
+# Builds Windows and Linux archives. A v* tag also creates a draft release with
+# them, for checking and publishing by hand. Running this workflow manually
+# only builds, which tests the code without releasing anything.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+            archive: AtlasWriter-windows-x64.zip
+            exe: AtlasWriter.exe
+          # An older base, so the build runs on more distributions.
+          - os: ubuntu-22.04
+            platform: linux-x64
+            archive: AtlasWriter-linux-x64.tar.gz
+            exe: AtlasWriter
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libibus-1.0-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libwayland-dev libdecor-0-dev
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release --parallel
+          cmake --install build --config Release --prefix dist/AtlasWriter
+
+      - name: Check the version
+        run: |
+          version=$(dist/AtlasWriter/${{ matrix.exe }} --version | tr -d '\r')
+          echo "Built version: $version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag $GITHUB_REF_NAME doesn't match version $version" >&2
+            exit 1
+          fi
+
+      - name: Create the archive
+        run: |
+          cd dist
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip "../${{ matrix.archive }}" AtlasWriter
+          else
+            tar -czf "../${{ matrix.archive }}" AtlasWriter
+          fi
+          cd ..
+          hash=$(sha256sum "${{ matrix.archive }}" | cut -d ' ' -f 1)
+          echo "${{ matrix.platform }} $hash" > "hash-${{ matrix.platform }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: |
+            ${{ matrix.archive }}
+            hash-${{ matrix.platform }}.txt
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          { echo "$version"; cat artifacts/hash-*.txt; } > artifacts/atlaswriter-update.txt
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "AtlasWriter $version" \
+            --notes-file .github/release-notes.md \
+            artifacts/AtlasWriter-windows-x64.zip \
+            artifacts/AtlasWriter-linux-x64.tar.gz \
+            artifacts/atlaswriter-update.txt

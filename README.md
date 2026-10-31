@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo-transparent.png" alt="The AtlasWriter logo: two hands holding up a stone marked Aw" width="220"></p>
+
 # AtlasWriter
 
 A minimalist text editor for the thinking mind
@@ -21,6 +23,28 @@ AtlasWriter also has support for viewing/editing code, it can detect when a code
 As an experiment, AtlasWriter was built to try and make use of a configuration language made by Dimitry Kovanikov in his article "The Most Elegant Configuration Language" in which he outlines how Category Theory can be used to structure data in the simplest possible way, while retaining a user friendly syntax. 
 
 This is something i'm currently still experimenting with so you should expect there to be changes soon as i figure out how i want to tackle using this. But for now, building AtlasWriter places an example file, `settings.example.ccl`, next to the executable so you can see every option and its default. Additionally, when you first open AtlasWriter it will create `Documents/AtlasWriter/settings.ccl`, filled with those defaults, and that is the file you should use to change your preferences.
+
+## Install
+
+Download the archive for your system from the [latest release](https://github.com/DefectiveNull/AtlasWriter/releases/latest), extract it, and run the install script from the extracted `AtlasWriter` folder. Neither one needs admin or root rights.
+
+- **Windows 10 or later:** `powershell -ExecutionPolicy Bypass -File install.ps1`, which adds AtlasWriter to the Start menu.
+- **Linux (x64):** `sh install.sh`, which adds AtlasWriter to your app launcher.
+
+AtlasWriter installs into a single folder in your user profile: `%LOCALAPPDATA%\Programs\AtlasWriter` on Windows and `~/.local/share/AtlasWriter` on Linux.
+
+### Updates
+
+AtlasWriter checks for a new version on GitHub when it starts, downloads it in the background and applies it when you close the app. On Linux this needs `curl`. To turn it off, add this to your `settings.ccl`:
+
+```
+updates =
+  check = false
+```
+
+### Uninstall
+
+Remove AtlasWriter from Settings > Apps on Windows, or run `sh ~/.local/share/AtlasWriter/uninstall.sh` on Linux. Your settings in `Documents/AtlasWriter` are kept.
 
 ## License
 
@@ -47,5 +71,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 The bundled fonts in `assets/fonts` are under the SIL Open Font License (see the
-`OFL` files next to them), and the stb libraries in `third_party/stb` keep their
-own license terms.
+`OFL` files next to them), and the stb and NanoSVG libraries in `third_party` keep
+their own license terms.
