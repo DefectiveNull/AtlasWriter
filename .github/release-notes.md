@@ -50,3 +50,5 @@ AtlasWriter then appears in your app launcher. Automatic updates need `curl`.
 
 - The builds aren't code signed, so Windows SmartScreen may warn you before running them.
 - There's no macOS build yet.
+- The Linux build has only been tested under WSL with X11, not on a full desktop. Native Wayland, the app launcher entry and the icon are untested.
+- With `check = false`, leftover files from a failed update stay in the install folder until checks are turned back on.
