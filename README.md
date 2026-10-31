@@ -20,7 +20,7 @@ AtlasWriter also has support for viewing/editing code, it can detect when a code
 
 ## And it's all driven by a novel and elegant configuration language
 
-As an experiment, AtlasWriter was built to try and make use of a configuration language made by Dimitry Kovanikov in his article "The Most Elegant Configuration Language" in which he outlines how Category Theory can be used to structure data in the simplest possible way, while retaining a user friendly syntax. 
+As an experiment, AtlasWriter was built to try and make use of a configuration language made by Dimitrii Kovanikov in his article "The Most Elegant Configuration Language" in which he outlines how Category Theory can be used to structure data in the simplest possible way, while retaining a user friendly syntax. 
 
 This is something i'm currently still experimenting with so you should expect there to be changes soon as i figure out how i want to tackle using this. But for now, building AtlasWriter places an example file, `settings.example.ccl`, next to the executable so you can see every option and its default. Additionally, when you first open AtlasWriter it will create `Documents/AtlasWriter/settings.ccl`, filled with those defaults, and that is the file you should use to change your preferences.
 
