@@ -44,6 +44,11 @@ shortcuts =
   /= only the first one listed works. With super, the system keeps some
   /= combinations for itself, like Win+E or Win+L on Windows.
   mod = auto
+
+updates =
+  /= Look for a new version on GitHub each time AtlasWriter starts. It is
+  /= downloaded in the background and applied when you close AtlasWriter.
+  check = true
 )";
 
 std::string_view trim(std::string_view s)
@@ -177,6 +182,7 @@ bool Settings::load(std::string_view text, Settings& out, std::vector<std::strin
     readFloat(scalar(user, defaults, "prose", "column width"), 0.0f, 1000.0f, s.proseColumnEms, "prose / column width",
               warnings);
     s.terminalShell = std::string(trim(scalar(user, defaults, "terminal", "shell")));
+    readBool(scalar(user, defaults, "updates", "check"), s.updateCheck, "updates / check", warnings);
     const std::string_view modKey = scalar(user, defaults, "shortcuts", "mod");
     if (!Shortcut::parseModKey(modKey, s.modKey))
         warnings.push_back("shortcuts / mod: expected auto, ctrl, shift or super, got \"" + std::string(modKey) + "\"");

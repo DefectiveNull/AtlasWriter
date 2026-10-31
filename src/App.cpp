@@ -12,6 +12,7 @@
 #include "ui/ImageCache.h"
 #include "ui/Keys.h"
 #include "ui/MenuBar.h"
+#include "update/Updater.h"
 
 #include <nanosvg.h>
 #include <nanosvgrast.h>
@@ -117,6 +118,7 @@ App::App() = default;
 App::~App()
 {
     // GPU resources must go before the renderer that owns them.
+    updater_.reset();  // cancels any download
     terminal_.reset(); // stops the shell
     outline_.reset();
     editor_.reset();
@@ -160,9 +162,10 @@ bool App::init(int argc, char* argv[])
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     SDL_Log("Renderer: %s", SDL_GetRendererName(renderer_));
 
-    dialogEvent_ = SDL_RegisterEvents(3);
+    dialogEvent_ = SDL_RegisterEvents(4);
     imageEvent_ = dialogEvent_ + 1;
     terminalEvent_ = dialogEvent_ + 2;
+    updateEvent_ = dialogEvent_ + 3;
     if (dialogEvent_ == 0) {
         SDL_Log("SDL_RegisterEvents failed: %s", SDL_GetError());
         return false;
@@ -220,15 +223,25 @@ bool App::init(int argc, char* argv[])
     // AtlasWriter [--preview] [file]
     const char* file = nullptr;
     bool preview = false;
+    std::string updateFeed;
     for (int i = 1; i < argc; ++i) {
         if (SDL_strcmp(argv[i], "--preview") == 0)
             preview = true;
+#ifndef NDEBUG
+        else if (SDL_strcmp(argv[i], "--update-feed") == 0 && i + 1 < argc)
+            updateFeed = argv[++i]; // tests the updater against a local folder
+#endif
         else
             file = argv[i];
     }
     if (!file || !loadFile(file))
         newDocument();
     setPreview(preview);
+
+    if (settings_.updateCheck) {
+        updater_ = std::make_unique<Updater>();
+        updater_->start(updateEvent_, std::move(updateFeed));
+    }
     return true;
 }
 
@@ -264,6 +277,10 @@ void App::handleEvent(SDL_Event& event)
 {
     if (event.type == dialogEvent_) {
         onDialogResult(event.user);
+        return;
+    }
+    if (event.type == updateEvent_) {
+        dirty_ = true; // shows the note in the status bar
         return;
     }
     if (event.type == imageEvent_) {
@@ -936,6 +953,10 @@ void App::draw()
     SDL_snprintf(right, sizeof(right), "%s    %zu lines    UTF-8%s    %s    %.2f ms", fileType_.name,
                  buffer_.lineCount(), bom_ ? " BOM" : "", crlf_ ? "CRLF" : "LF", lastFrameMs_);
     uiText.draw(pad, textY, left, theme::kStatusText);
+    if (updater_ && updater_->updateReady()) {
+        uiText.draw(std::round(pad * 3.0f + uiText.measure(left)), textY,
+                    "Update ready: applies when you close AtlasWriter", theme::kStatusText);
+    }
     uiText.draw(std::round(width - pad - uiText.measure(right)), textY, right, theme::kStatusText);
     uiText.flush();
 

@@ -33,6 +33,7 @@ struct Settings
     float proseColumnEms = 40.0f; // 0 = use the full window width
     std::string terminalShell;    // empty = the platform default
     ModKey modKey = kDefaultModKey;
+    bool updateCheck = true;      // look for a new version at startup
     std::vector<Binding> bindings;
 
     // The CCL text of the defaults, written out as the initial settings file.

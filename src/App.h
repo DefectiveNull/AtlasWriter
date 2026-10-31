@@ -21,6 +21,7 @@ class TerminalView;
 class MenuBar;
 class TextBatch;
 class TextRenderer;
+class Updater;
 
 class App
 {
@@ -137,6 +138,8 @@ private:
     bool bom_ = false;  // file started with a UTF-8 BOM; restored on save
     bool preview_ = false; // Markdown: showing the rendered view
 
+    std::unique_ptr<Updater> updater_; // null if update checks are off
+    Uint32 updateEvent_ = 0;           // an update is ready to apply
     Uint32 dialogEvent_ = 0; // custom event type for file dialog results
     Uint32 imageEvent_ = 0;  // ... finished image decodes
     Uint32 terminalEvent_ = 0; // ... and terminal output

@@ -115,6 +115,9 @@ add_executable(AtlasWriter
     src/ui/Keys.h
     src/ui/MenuBar.cpp
     src/ui/MenuBar.h
+    src/update/Sha256.h
+    src/update/Updater.cpp
+    src/update/Updater.h
 )
 
 # A GUI executable: as a console one, Windows groups the console with the main

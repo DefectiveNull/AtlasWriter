@@ -3,6 +3,7 @@
 
 #include "App.h"
 #include "config/Settings.h"
+#include "update/Updater.h"
 
 #include <cstdio>
 #include <string>
@@ -25,9 +26,12 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    App app;
-    if (!app.init(argc, argv))
-        return 1;
-    app.run();
+    {
+        App app;
+        if (!app.init(argc, argv))
+            return 1;
+        app.run();
+    }
+    applyStagedUpdate();
     return 0;
 }
