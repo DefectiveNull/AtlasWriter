@@ -1,11 +1,34 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(AtlasWriter VERSION 0.1.0 LANGUAGES C CXX)
+project(AtlasWriter VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Static runtime, so a release build runs without Visual Studio's redistributables.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Ninja finds header dependencies by matching the compiler's localized
+# "Note: including file:" prefix. CMake's own detection mangles non-ASCII
+# prefixes, which silently disables header tracking, so read the real one.
+if(MSVC AND CMAKE_GENERATOR MATCHES "Ninja")
+    set(probe_dir "${CMAKE_BINARY_DIR}/CMakeFiles/showincludes")
+    file(WRITE "${probe_dir}/probe.h" "")
+    file(WRITE "${probe_dir}/probe.cpp" "#include \"probe.h\"\n")
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" /nologo /c /showIncludes /utf-8 probe.cpp
+        WORKING_DIRECTORY "${probe_dir}"
+        OUTPUT_VARIABLE probe_output
+        ERROR_VARIABLE probe_output
+        ENCODING UTF8)
+    if(probe_output MATCHES "([^\r\n]*: )[A-Za-z]:[^\r\n]*probe\\.h")
+        set(CMAKE_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_1}")
+        set(CMAKE_C_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_1}")
+        set(CMAKE_CXX_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_1}")
+    endif()
+endif()
 
 # ---------------------------------------------------------------------------
 # SDL3: use a system install if asked, otherwise download and build it
@@ -21,6 +44,7 @@ else()
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(SDL3
         URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -100,6 +124,7 @@ if(WIN32)
     set_target_properties(AtlasWriter PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
+target_compile_definitions(AtlasWriter PRIVATE ATLASWRITER_VERSION="${PROJECT_VERSION}")
 target_include_directories(AtlasWriter PRIVATE src)
 target_link_libraries(AtlasWriter PRIVATE ${ATLASWRITER_SDL_TARGET} stb nanosvg)
 
@@ -112,6 +137,20 @@ add_custom_command(TARGET AtlasWriter POST_BUILD
     COMMAND AtlasWriter --write-example-settings
             "$<TARGET_FILE_DIR:AtlasWriter>/settings.example.ccl"
 )
+
+# The release layout: cmake --install build --prefix dist/AtlasWriter
+install(TARGETS AtlasWriter RUNTIME DESTINATION .)
+install(DIRECTORY assets/ DESTINATION assets)
+install(FILES
+    assets/icon.svg
+    LICENSE
+    README.md
+    "$<TARGET_FILE_DIR:AtlasWriter>/settings.example.ccl"
+    DESTINATION .)
+install(FILES third_party/nanosvg/LICENSE.txt DESTINATION licenses RENAME nanosvg.txt)
+if(NOT ATLASWRITER_USE_SYSTEM_SDL)
+    install(FILES "${sdl3_SOURCE_DIR}/LICENSE.txt" DESTINATION licenses RENAME SDL3.txt)
+endif()
 
 if(MSVC)
     target_compile_options(AtlasWriter PRIVATE /W4 /permissive- /utf-8)

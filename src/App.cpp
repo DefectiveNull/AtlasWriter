@@ -142,6 +142,9 @@ bool App::init(int argc, char* argv[])
     // as Home/End/arrows instead of SDLK_KP_* and navigate like the main keys.
     SDL_SetHint(SDL_HINT_KEYCODE_OPTIONS, "french_numbers,latin_letters,hide_numpad");
 
+    // The id ties the window to its launcher entry on Linux desktops.
+    SDL_SetAppMetadata("AtlasWriter", ATLASWRITER_VERSION, "atlaswriter");
+
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return false;

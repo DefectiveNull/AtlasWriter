@@ -4,10 +4,16 @@
 #include "App.h"
 #include "config/Settings.h"
 
+#include <cstdio>
 #include <string>
 
 int main(int argc, char* argv[])
 {
+    if (argc == 2 && SDL_strcmp(argv[1], "--version") == 0) {
+        std::fputs(ATLASWRITER_VERSION "\n", stdout);
+        return 0;
+    }
+
     // Build step: writes the example settings file and exits, without opening
     // a window (so the example can't drift from the built-in defaults).
     if (argc == 3 && SDL_strcmp(argv[1], "--write-example-settings") == 0) {
