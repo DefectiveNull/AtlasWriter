@@ -147,6 +147,11 @@ install(FILES
     README.md
     "$<TARGET_FILE_DIR:AtlasWriter>/settings.example.ccl"
     DESTINATION .)
+if(WIN32)
+    install(FILES install/install.ps1 install/uninstall.ps1 DESTINATION .)
+else()
+    install(PROGRAMS install/install.sh install/uninstall.sh DESTINATION .)
+endif()
 install(FILES third_party/nanosvg/LICENSE.txt DESTINATION licenses RENAME nanosvg.txt)
 if(NOT ATLASWRITER_USE_SYSTEM_SDL)
     install(FILES "${sdl3_SOURCE_DIR}/LICENSE.txt" DESTINATION licenses RENAME SDL3.txt)
