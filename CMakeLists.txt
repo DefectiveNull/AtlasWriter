@@ -34,6 +34,13 @@ endif()
 add_library(stb STATIC third_party/stb/stb_truetype.c third_party/stb/stb_image.c)
 target_include_directories(stb SYSTEM PUBLIC third_party/stb)
 
+# NanoSVG rasterizes icon.svg at startup.
+add_library(nanosvg STATIC third_party/nanosvg/nanosvg.c)
+target_include_directories(nanosvg SYSTEM PUBLIC third_party/nanosvg)
+if(UNIX)
+    target_link_libraries(nanosvg PUBLIC m)
+endif()
+
 add_executable(AtlasWriter
     src/main.cpp
     src/App.cpp
@@ -86,13 +93,22 @@ add_executable(AtlasWriter
     src/ui/MenuBar.h
 )
 
+# A GUI executable: as a console one, Windows groups the console with the main
+# window on one taskbar button and shows the .exe's icon instead of icon.svg.
+if(WIN32)
+    target_sources(AtlasWriter PRIVATE src/app.rc)
+    set_target_properties(AtlasWriter PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
 target_include_directories(AtlasWriter PRIVATE src)
-target_link_libraries(AtlasWriter PRIVATE ${ATLASWRITER_SDL_TARGET} stb)
+target_link_libraries(AtlasWriter PRIVATE ${ATLASWRITER_SDL_TARGET} stb nanosvg)
 
 # Fonts etc. are loaded relative to the executable
 add_custom_command(TARGET AtlasWriter POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:AtlasWriter>/assets"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/assets/icon.svg" "$<TARGET_FILE_DIR:AtlasWriter>/icon.svg"
     COMMAND AtlasWriter --write-example-settings
             "$<TARGET_FILE_DIR:AtlasWriter>/settings.example.ccl"
 )

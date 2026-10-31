@@ -13,6 +13,9 @@
 #include "ui/Keys.h"
 #include "ui/MenuBar.h"
 
+#include <nanosvg.h>
+#include <nanosvgrast.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -59,6 +62,32 @@ bool samePath(std::string a, std::string b)
         }
     }
     return a == b;
+}
+
+// Rasterizes icon.svg, which sits next to the executable, into the window icon.
+void setWindowIcon(SDL_Window* window)
+{
+    constexpr int kIconSize = 64;
+    const std::string path = std::string(SDL_GetBasePath()) + "icon.svg";
+    size_t size = 0;
+    char* text = static_cast<char*>(SDL_LoadFile(path.c_str(), &size)); // null-terminated
+    if (!text) {
+        SDL_Log("Could not load the window icon: %s", SDL_GetError());
+        return;
+    }
+    NSVGimage* image = nsvgParse(text, "px", 96.0f);
+    SDL_free(text);
+    NSVGrasterizer* rasterizer = nsvgCreateRasterizer();
+    SDL_Surface* icon = SDL_CreateSurface(kIconSize, kIconSize, SDL_PIXELFORMAT_RGBA32);
+    if (image && rasterizer && icon && image->width > 0.0f) {
+        nsvgRasterize(rasterizer, image, 0.0f, 0.0f, kIconSize / image->width, static_cast<unsigned char*>(icon->pixels),
+                      kIconSize, kIconSize, icon->pitch);
+        if (!SDL_SetWindowIcon(window, icon))
+            SDL_Log("Could not set the window icon: %s", SDL_GetError());
+    }
+    SDL_DestroySurface(icon);
+    nsvgDeleteRasterizer(rasterizer);
+    nsvgDelete(image);
 }
 
 // Documents/AtlasWriter/settings.ccl, where people will find it. Falls back to
@@ -123,6 +152,7 @@ bool App::init(int argc, char* argv[])
         SDL_Log("SDL_CreateWindowAndRenderer failed: %s", SDL_GetError());
         return false;
     }
+    setWindowIcon(window_);
     SDL_SetRenderVSync(renderer_, 1);
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     SDL_Log("Renderer: %s", SDL_GetRendererName(renderer_));

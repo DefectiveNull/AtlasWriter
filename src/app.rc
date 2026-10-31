@@ -1,0 +1,3 @@
+// The first icon resource is what Windows shows for the executable, its
+// pinned shortcuts and, through SDL's window class, its taskbar button.
+1 ICON "../assets/icon.ico"
