@@ -97,14 +97,23 @@ void setWindowIcon(SDL_Window* window)
 std::string findSettingsPath()
 {
     constexpr const char* kFileName = "settings.ccl";
-    if (const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)) { // owned by SDL
-        const std::string folder = std::string(documents) + "AtlasWriter";
+    // Linux has no Documents folder on record without user-dirs.dirs. Both are
+    // owned by SDL.
+    const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+    const char* home = SDL_GetUserFolder(SDL_FOLDER_HOME);
+    std::string folder;
+    if (documents)
+        folder = std::string(documents) + "AtlasWriter";
+    else if (home)
+        folder = std::string(home) + "Documents/AtlasWriter";
+    if (!folder.empty()) {
         if (SDL_CreateDirectory(folder.c_str()))
             return folder + "/" + kFileName;
         SDL_Log("Could not create %s: %s", folder.c_str(), SDL_GetError());
     }
     std::string path;
-    if (char* prefs = SDL_GetPrefPath("AtlasWriter", "AtlasWriter")) {
+    // Not "AtlasWriter/AtlasWriter": on Linux that is the installed executable.
+    if (char* prefs = SDL_GetPrefPath("", "AtlasWriterSettings")) {
         path = std::string(prefs) + kFileName;
         SDL_free(prefs);
     }
