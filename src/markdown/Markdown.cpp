@@ -351,10 +351,10 @@ std::vector<Block> parse(std::string_view text)
             continue;
         } else if (isRule(body)) {
             close();
-            blocks.push_back({BlockType::Rule, 0, quote, -1, {}, lineNo, {}, {}, {}, {}});
+            blocks.push_back({BlockType::Rule, 0, quote, -1, SIZE_MAX, {}, lineNo, {}, {}, {}, {}});
         } else if (const int level = headingLevel(body, content); level > 0) {
             close();
-            blocks.push_back({BlockType::Heading, level, quote, -1, {}, lineNo, parseInline(content), {}, {}, {}});
+            blocks.push_back({BlockType::Heading, level, quote, -1, SIZE_MAX, {}, lineNo, parseInline(content), {}, {}, {}});
         } else if (listMarker(body, marker, content)) {
             close();
             current.type = BlockType::ListItem;
@@ -368,8 +368,11 @@ std::vector<Block> parse(std::string_view text)
                     current.task = 0;
                 else if (content[1] == 'x' || content[1] == 'X')
                     current.task = 1;
-                if (current.task >= 0)
+                if (current.task >= 0) {
+                    // `content` views `text`, so this is the mark's offset in the file.
+                    current.taskPos = static_cast<size_t>(content.data() + 1 - text.data());
                     content = trimLeft(content.substr(3));
+                }
             }
             raw.assign(trimRight(content));
             lastLineStart = 0;

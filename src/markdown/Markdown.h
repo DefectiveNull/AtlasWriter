@@ -52,6 +52,8 @@ struct Block
     int level = 0;        // heading 1-6, or list nesting depth (0 = top level)
     int quote = 0;        // block quote depth
     int task = -1;        // list items: -1 not a task, 0 open, 1 done
+    size_t taskPos = SIZE_MAX; // tasks: offset in the source of the char between the brackets
+                               // (SIZE_MAX for HTML checkboxes, which cannot be toggled)
     std::string marker;   // list items: "1." for ordered, empty for bullets
     size_t sourceLine = 0;
     std::vector<Span> spans; // inline content (Paragraph, Heading, ListItem)

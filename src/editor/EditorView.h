@@ -65,6 +65,11 @@ public:
     void selectAll();
     bool hasSelection() const { return cursor_ != anchor_; }
 
+    // An edit made from outside the text (e.g. ticking a checkbox in the
+    // Markdown preview): one undo step of its own, and the caret and
+    // selection stay on the same text instead of jumping to the edit.
+    void replace(size_t pos, size_t length, std::string_view text);
+
     // Identifies the document state for "unsaved changes" checks: compare
     // with the value taken at save time (see UndoHistory::stateId()).
     uint64_t stateId() const { return history_.stateId(); }

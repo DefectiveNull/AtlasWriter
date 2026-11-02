@@ -415,9 +415,15 @@ void App::handleEvent(SDL_Event& event)
         dirty_ |= terminal_->handleEvent(event);
         return;
     }
-    if (previewing())
+    if (previewing()) {
         dirty_ |= markdown_->handleEvent(event);
-    else
+        size_t pos = 0;
+        char mark = ' ';
+        if (markdown_->takeTaskToggle(pos, mark) && pos < buffer_.size()) {
+            editor_->replace(pos, 1, std::string_view(&mark, 1));
+            refreshPreview();
+        }
+    } else
         dirty_ |= editor_->handleEvent(event);
 }
 
@@ -476,12 +482,12 @@ void App::runCommand(int command)
         setPreview(!preview_);
         break;
     case kCmdUndo:
-        if (!previewing())
-            editor_->undo();
+        if (editor_->undo() && previewing())
+            refreshPreview();
         break;
     case kCmdRedo:
-        if (!previewing())
-            editor_->redo();
+        if (editor_->redo() && previewing())
+            refreshPreview();
         break;
     case kCmdCut:
         if (!previewing())
@@ -785,6 +791,13 @@ void App::setPreview(bool preview)
     dirty_ = true;
 }
 
+void App::refreshPreview()
+{
+    // Re-parses; scrolling and collapsed headings are kept.
+    markdown_->setSource(buffer_.toString(), buffer_.version());
+    dirty_ = true;
+}
+
 // ---------------------------------------------------------------------------
 // Layout and drawing
 // ---------------------------------------------------------------------------
@@ -1015,7 +1028,7 @@ void App::updateMouseCursor(float x, float y)
         } else if (outlineShown() && outline_->contains(x, y)) {
             wanted = arrowCursor_;
         } else if (previewing()) {
-            wanted = markdown_->isOverHeading(x, y) ? pointerCursor_ : arrowCursor_;
+            wanted = markdown_->isOverClickable(x, y) ? pointerCursor_ : arrowCursor_;
         } else if (editor_->isOverText(x, y)) {
             wanted = textCursor_;
         }
@@ -1188,8 +1201,8 @@ EditorStyle App::proseStyle() const
 void App::updateMenus()
 {
     const bool editing = !previewing();
-    menu_->setEnabled(kCmdUndo, editing && editor_->canUndo());
-    menu_->setEnabled(kCmdRedo, editing && editor_->canRedo());
+    menu_->setEnabled(kCmdUndo, editor_->canUndo()); // also in the preview (checkbox clicks)
+    menu_->setEnabled(kCmdRedo, editor_->canRedo());
     menu_->setEnabled(kCmdCut, editing && editor_->hasSelection());
     menu_->setEnabled(kCmdCopy, editing && editor_->hasSelection());
     menu_->setEnabled(kCmdPaste, editing);

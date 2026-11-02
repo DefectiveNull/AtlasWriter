@@ -262,6 +262,27 @@ void EditorView::eraseSelection(UndoHistory::Kind kind)
     edit(start, selectionEnd() - start, {}, kind);
 }
 
+void EditorView::replace(size_t pos, size_t length, std::string_view text)
+{
+    const UndoHistory::Selection before{cursor_, anchor_};
+    std::string removed = buffer_.substr(pos, length);
+    applyEdit(pos, length, text);
+
+    // Positions after the edit shift with it; ones inside it move to its end.
+    const auto shift = [&](size_t p) {
+        if (p >= pos + length)
+            return p - length + text.size();
+        return p > pos ? pos + text.size() : p;
+    };
+    cursor_ = shift(cursor_);
+    anchor_ = shift(anchor_);
+
+    history_.breakGroup();
+    history_.record(UndoHistory::Kind::Other, {pos, std::move(removed), std::string(text)}, before,
+                    {cursor_, anchor_}, SDL_GetTicks());
+    history_.breakGroup();
+}
+
 bool EditorView::undo()
 {
     if (!history_.canUndo())

@@ -128,9 +128,32 @@ int MarkdownView::headingAt(float x, float y) const
     return -1;
 }
 
-bool MarkdownView::isOverHeading(float x, float y) const
+int MarkdownView::taskAt(float x, float y) const
 {
-    return headingAt(x, y) >= 0;
+    if (!ui::contains(bounds_, x, y))
+        return -1;
+    const float docX = x - columnLeft();
+    const float docY = y - bounds_.y + std::round(scrollY_);
+    for (size_t i = 0; i < tasks_.size(); ++i) {
+        if (ui::contains(tasks_[i].rect, docX, docY))
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+bool MarkdownView::isOverClickable(float x, float y) const
+{
+    return headingAt(x, y) >= 0 || taskAt(x, y) >= 0;
+}
+
+bool MarkdownView::takeTaskToggle(size_t& pos, char& mark)
+{
+    if (pendingTaskPos_ == SIZE_MAX)
+        return false;
+    pos = pendingTaskPos_;
+    mark = pendingTaskMark_;
+    pendingTaskPos_ = SIZE_MAX;
+    return true;
 }
 
 void MarkdownView::toggle(size_t block)
@@ -350,6 +373,7 @@ void MarkdownView::layout()
     maxLineHeight_ = 0.0f;
     boxes_.clear();
     headings_.clear();
+    tasks_.clear();
     hoverHeading_ = -1;
     layoutWidth_ = columnWidth();
 
@@ -424,6 +448,12 @@ void MarkdownView::layoutBlock(const md::Block& block, const md::Block* next, fl
                 boxes_.push_back({box, block.task == 1 ? theme::kMenuActive : theme::kMuted});
                 if (block.task == 0)
                     boxes_.push_back({{box.x + 1.0f, box.y + 1.0f, box.w - 2.0f, box.h - 2.0f}, theme::kEditorBg});
+                if (block.taskPos != SIZE_MAX) {
+                    // A little slack around the box makes it easier to hit.
+                    const float pad = std::round(em() * 0.2f);
+                    tasks_.push_back({{box.x - pad, box.y - pad, box.w + 2.0f * pad, box.h + 2.0f * pad},
+                                      block.taskPos, block.task == 1});
+                }
             } else {
                 std::string marker = block.marker.empty() ? kBullets[block.level % 2] : block.marker;
                 const float width = text->measure(marker);
@@ -828,6 +858,12 @@ bool MarkdownView::handleEvent(const SDL_Event& event)
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         if (event.button.button != SDL_BUTTON_LEFT)
             return false;
+        if (const int task = taskAt(event.button.x, event.button.y); task >= 0) {
+            const TaskHit& hit = tasks_[static_cast<size_t>(task)];
+            pendingTaskPos_ = hit.pos;
+            pendingTaskMark_ = hit.done ? ' ' : 'x';
+            return true;
+        }
         const int heading = headingAt(event.button.x, event.button.y);
         if (heading < 0)
             return false;

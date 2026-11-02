@@ -79,6 +79,7 @@ private:
     // gutter, and whether the Markdown preview is available.
     void applyWorkspace();
     void setPreview(bool preview);
+    void refreshPreview(); // after an edit made while previewing (checkbox, undo)
     void documentChanged(); // new path or contents: reset per-document caches
     void updateMenus();
 

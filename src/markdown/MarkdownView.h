@@ -61,7 +61,13 @@ public:
     // Scrolls to a source line, expanding any collapsed heading hiding it.
     void revealSourceLine(size_t line);
 
-    bool isOverHeading(float x, float y) const;
+    // Over something that reacts to a click: a heading or a task checkbox.
+    bool isOverClickable(float x, float y) const;
+
+    // A clicked task checkbox, waiting for the app to edit the source: the
+    // mark's offset and its new character ('x' or ' '). Returns false if
+    // nothing was clicked since the last call.
+    bool takeTaskToggle(size_t& pos, char& mark);
     void collapseAll();
     void expandAll();
 
@@ -104,6 +110,14 @@ private:
         size_t block;
     };
 
+    // Clickable task checkbox, in document coordinates (x from columnLeft()).
+    struct TaskHit
+    {
+        SDL_FRect rect;
+        size_t pos;  // the mark's offset in the source
+        bool done;
+    };
+
     void layout();
     void layoutBlock(const md::Block& block, const md::Block* next, float& y);
     void flow(const md::Block& block, float left, float right, float& y, float spacing);
@@ -116,6 +130,7 @@ private:
 
     void buildHeadingKeys();
     int headingAt(float x, float y) const; // index into headings_, or -1
+    int taskAt(float x, float y) const;    // index into tasks_, or -1
     void toggle(size_t block);
     void drawMarker(SDL_Renderer* renderer, float x, float y, bool collapsed, SDL_FColor color) const;
 
@@ -140,6 +155,9 @@ private:
     std::unordered_set<std::string> collapsed_;
     std::vector<HeadingHit> headings_;     // visible headings, sorted by top
     int hoverHeading_ = -1;
+    std::vector<TaskHit> tasks_;           // visible toggleable checkboxes
+    size_t pendingTaskPos_ = SIZE_MAX;     // clicked, not yet taken by the app
+    char pendingTaskMark_ = ' ';
 
     std::vector<Line> lines_; // sorted by y
     std::vector<Box> boxes_;
