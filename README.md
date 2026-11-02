@@ -8,11 +8,7 @@ A minimalist text editor for the thinking mind
 
 AtlasWriter was first conceived of my personal exhaustion with the mediocrity of markdown editor projects, most of which are either lazy or unintuitive. It's clear to me that if all you want is a markdown editor that can make the best uses of what the format has to offer you either have to go with obsidian (a massive tool that is aimed at doing much more than just writing markdown) or you have to build your own, so here i go.
 
-The markdown functionality is in it's infancy and i have plans for things i want to support in future, mainly:
-	- Support for dragging and dropping images to link them (and have them show in preview)
-	- Support for style configuration I.e font, font size, link embedding style among other things
-	- support for previewing PDF files for reference
-	- Support for inline code blocks that can be compiled and ran directly in the editor 												window
+The markdown functionality is in it's infancy and i have plans for things i want to support in future, which you can find in the [roadmap](ROADMAP.md).
 	
 ## A code editor that doesn't get in the way
 
