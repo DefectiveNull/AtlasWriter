@@ -5,13 +5,13 @@ AtlasWriter's releases are planned as milestones. Each major version (2.0, 3.0 a
 ## 2.0
 
 - Markdown quality of life improvements:
-  - Drag and drop images to link them
-  - Links to external websites, with basic embedding
+  - Drag and drop images to link them (done in 1.3)
+  - Links to external websites, with basic embedding (done in 1.3)
   - Meta blocks that set the file's metadata, for better browsing (done in 1.1.1)
   - Interactive elements in preview mode, such as checking off to-do list items (to-do lists done in 1.1)
-- Workspaces for working with PDFs and EPUBs (the tiling they sit in is done in 1.2)
-- HTML previews
-- Audio annotation
+- Workspaces for working with PDFs and EPUBs (done in 1.3)
+- HTML previews (done in 1.3)
+- Audio annotation (an audio player is in 1.3; annotating comes next)
 - Custom color themes
 
 ## 3.0
