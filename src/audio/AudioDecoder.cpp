@@ -54,7 +54,7 @@ struct File
         return SDL_SeekIO(static_cast<File*>(user)->io, offset, whence(origin)) >= 0;
     }
 
-    static bool tell(void* user, int64_t* cursor)
+    static bool tell(void* user, long long* cursor) // the libraries' int64 is long long everywhere
     {
         const Sint64 at = SDL_TellIO(static_cast<File*>(user)->io);
         *cursor = at;
