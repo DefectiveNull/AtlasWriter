@@ -13,6 +13,13 @@ if ($running) {
     throw 'AtlasWriter is running. Close it and try again.'
 }
 
+# File Explorer integration (asks for admin rights). Also moves the DLL
+# Explorer may be holding out of the folder, so the folder can be removed.
+$explorer = Join-Path $target 'explorer.ps1'
+if (Test-Path $explorer) {
+    & $explorer -Unregister
+}
+
 $shortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AtlasWriter.lnk'
 if (Test-Path $shortcutPath) {
     Remove-Item $shortcutPath -Force

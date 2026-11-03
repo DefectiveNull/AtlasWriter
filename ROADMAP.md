@@ -7,7 +7,7 @@ AtlasWriter's releases are planned as milestones. Each major version (2.0, 3.0 a
 - Markdown quality of life improvements:
   - Drag and drop images to link them
   - Links to external websites, with basic embedding
-  - Meta blocks that set the file's metadata, for better browsing
+  - Meta blocks that set the file's metadata, for better browsing (done in 1.1.1)
   - Interactive elements in preview mode, such as checking off to-do list items (to-do lists done in 1.1)
 - Workspaces for working with PDFs and EPUBs
 - HTML previews

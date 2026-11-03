@@ -1,0 +1,4 @@
+LIBRARY AtlasWriterProps
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

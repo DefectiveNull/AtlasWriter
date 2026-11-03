@@ -5,6 +5,7 @@
 #include "editor/FileType.h"
 #include "config/Settings.h"
 #include "editor/TextBuffer.h"
+#include "markdown/Meta.h"
 #include "text/Font.h"
 
 #include <array>
@@ -73,6 +74,7 @@ private:
     bool writeFile(const char* path);
     bool modified() const;
     std::string displayName() const;
+    void updateMeta(); // re-reads the ```meta block after edits (Markdown only)
     void showError(const std::string& message);
 
     // Picks the workspace for the current file type: fonts, wrapping,
@@ -165,4 +167,9 @@ private:
     bool showAtlas_ = false;
     double lastFrameMs_ = 0.0;
     std::string title_;
+
+    md::Meta meta_;                     // the document's ```meta block
+    std::string metaSummary_;           // status bar: "#tag #tag · date · author"
+    uint64_t metaVersion_ = UINT64_MAX; // buffer version meta_ was read at
+    FileKind metaKind_ = FileKind::Code;
 };

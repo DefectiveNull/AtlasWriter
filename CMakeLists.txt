@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(AtlasWriter VERSION 1.1.0 LANGUAGES C CXX)
+project(AtlasWriter VERSION 1.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,6 +92,10 @@ add_executable(AtlasWriter
     src/markdown/Html.h
     src/markdown/Markdown.cpp
     src/markdown/Markdown.h
+    src/markdown/FileMeta.cpp
+    src/markdown/FileMeta.h
+    src/markdown/Meta.cpp
+    src/markdown/Meta.h
     src/markdown/MarkdownView.cpp
     src/markdown/MarkdownView.h
     src/markdown/OutlinePanel.cpp
@@ -141,6 +145,29 @@ add_custom_command(TARGET AtlasWriter POST_BUILD
             "$<TARGET_FILE_DIR:AtlasWriter>/settings.example.ccl"
 )
 
+# Windows: the Explorer property handler that shows a Markdown file's ```meta
+# block (title, tags, author...) in File Explorer. See src/explorer.
+if(WIN32)
+    add_library(AtlasWriterProps SHARED
+        src/explorer/PropertyHandler.cpp
+        src/explorer/AtlasWriterProps.def
+        src/markdown/Meta.cpp
+        src/markdown/Meta.h
+        src/config/Ccl.cpp
+        src/config/Ccl.h
+    )
+    target_include_directories(AtlasWriterProps PRIVATE src)
+    target_compile_definitions(AtlasWriterProps PRIVATE UNICODE _UNICODE)
+    target_link_libraries(AtlasWriterProps PRIVATE propsys shlwapi)
+    if(MSVC)
+        target_compile_options(AtlasWriterProps PRIVATE /W4 /permissive- /utf-8)
+    endif()
+    # Next to the executable, so a build folder works with install.ps1 too.
+    set_target_properties(AtlasWriterProps PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    add_dependencies(AtlasWriter AtlasWriterProps)
+endif()
+
 # The release layout: cmake --install build --prefix dist/AtlasWriter
 install(TARGETS AtlasWriter RUNTIME DESTINATION .)
 install(DIRECTORY assets/ DESTINATION assets)
@@ -151,7 +178,8 @@ install(FILES
     "$<TARGET_FILE_DIR:AtlasWriter>/settings.example.ccl"
     DESTINATION .)
 if(WIN32)
-    install(FILES install/install.ps1 install/uninstall.ps1 DESTINATION .)
+    install(FILES "$<TARGET_FILE:AtlasWriterProps>" DESTINATION .) # the DLL only, no import library
+    install(FILES install/install.ps1 install/uninstall.ps1 install/explorer.ps1 DESTINATION .)
 else()
     install(PROGRAMS install/install.sh install/uninstall.sh DESTINATION .)
 endif()

@@ -35,7 +35,7 @@ if ($running) {
 
 # Only these go in: a build folder also holds CMake's output.
 $required = 'AtlasWriter.exe', 'icon.svg', 'settings.example.ccl', 'assets'
-$optional = 'LICENSE', 'README.md', 'licenses'
+$optional = 'AtlasWriterProps.dll', 'LICENSE', 'README.md', 'licenses'
 foreach ($name in $required) {
     if (-not (Test-Path (Join-Path $Source $name))) {
         throw "'$name' is missing from '$Source'."
@@ -43,17 +43,29 @@ foreach ($name in $required) {
 }
 
 New-Item -ItemType Directory -Force $target | Out-Null
+
+# Copies of the Explorer DLL set aside by an earlier install; gone once
+# Explorer let go of them.
+Get-ChildItem $target -Filter 'AtlasWriterProps.dll.old-*' -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
 foreach ($name in $required + $optional) {
     $from = Join-Path $Source $name
     $to = Join-Path $target $name
     if (Test-Path $to) {
-        Remove-Item $to -Recurse -Force
+        try {
+            Remove-Item $to -Recurse -Force
+        } catch {
+            # Explorer keeps the DLL loaded; a loaded file can still be renamed.
+            Rename-Item $to "$name.old-$([guid]::NewGuid())"
+        }
     }
     if (Test-Path $from) {
         Copy-Item $from $to -Recurse
     }
 }
 Copy-Item (Join-Path $here 'uninstall.ps1') $target -Force
+Copy-Item (Join-Path $here 'explorer.ps1') $target -Force
 Set-Content -Path (Join-Path $target 'installed.marker') -Value 'AtlasWriter' -Encoding ascii
 
 # Start menu entry, which is what makes it searchable.
@@ -81,3 +93,9 @@ Set-ItemProperty -Path $key -Name NoModify -Value 1 -Type DWord
 Set-ItemProperty -Path $key -Name NoRepair -Value 1 -Type DWord
 
 Write-Output "AtlasWriter $version installed to $target"
+
+# Markdown metadata in File Explorer. Asks for admin rights once; declining
+# only skips this part.
+if (Test-Path (Join-Path $target 'AtlasWriterProps.dll')) {
+    & (Join-Path $target 'explorer.ps1') -Register
+}

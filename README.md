@@ -20,9 +20,25 @@ As an experiment, AtlasWriter was built to try and make use of a configuration l
 
 This is something i'm currently still experimenting with so you should expect there to be changes soon as i figure out how i want to tackle using this. But for now, building AtlasWriter places an example file, `settings.example.ccl`, next to the executable so you can see every option and its default. Additionally, when you first open AtlasWriter it will create `Documents/AtlasWriter/settings.ccl`, filled with those defaults, and that is the file you should use to change your preferences.
 
+The same language describes your documents too. A `meta` block at the very top of a markdown file holds its metadata:
+
+````
+```meta
+title = My Notes
+tags =
+  = work
+  = ideas
+date = 2026-11-02
+author = Your Name
+description = What this file is about
+```
+````
+
+AtlasWriter shows the title in the window title and the tags, date and author in the status bar, and hides the block in the rendered view. File managers see it too: Windows File Explorer shows the title, tags, author, description and dates in the details pane, the Properties dialog and search, and on Linux they are saved as file attributes that KDE's Dolphin shows. You can also use `created` and `updated` instead of `date`, write tags as `tags = work, ideas`, and add any other fields you like.
+
 ## Install
 
-Download the archive for your system from the [latest release](https://github.com/DefectiveNull/AtlasWriter/releases/latest), extract it, and run the install script from the extracted `AtlasWriter` folder. Neither one needs admin or root rights.
+Download the archive for your system from the [latest release](https://github.com/DefectiveNull/AtlasWriter/releases/latest), extract it, and run the install script from the extracted `AtlasWriter` folder. Linux needs no root rights. On Windows, everything installs for your user only, but showing markdown metadata in File Explorer needs admin rights once, so you'll see one Windows prompt (UAC) for that step; saying no just skips it.
 
 - **Windows 10 or later:** `powershell -ExecutionPolicy Bypass -File install.ps1`, which adds AtlasWriter to the Start menu.
 - **Linux (x64):** `sh install.sh`, which adds AtlasWriter to your app launcher.
@@ -40,7 +56,7 @@ updates =
 
 ### Uninstall
 
-Remove AtlasWriter from Settings > Apps on Windows, or run `sh ~/.local/share/AtlasWriter/uninstall.sh` on Linux. Your settings in `Documents/AtlasWriter` are kept.
+Remove AtlasWriter from Settings > Apps on Windows (it asks for admin rights once, to remove the File Explorer integration), or run `sh ~/.local/share/AtlasWriter/uninstall.sh` on Linux. Your settings in `Documents/AtlasWriter` are kept.
 
 ## License
 

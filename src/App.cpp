@@ -3,6 +3,7 @@
 #include "config/Commands.h"
 #include "editor/EditorView.h"
 #include "editor/Syntax.h"
+#include "markdown/FileMeta.h"
 #include "markdown/MarkdownView.h"
 #include "markdown/OutlinePanel.h"
 #include "terminal/TerminalView.h"
@@ -731,6 +732,8 @@ bool App::writeFile(const char* path)
         showError(std::string("Could not save \"") + path + "\":\n" + SDL_GetError());
         return false;
     }
+    if (detectFileType(path).kind == FileKind::Markdown)
+        writeFileMetadata(path, md::parseMeta(std::string_view(text).substr(0, 64 * 1024)));
     savedState_ = editor_->stateId();
     editor_->breakUndoGroup(); // so undo can land exactly on the saved text
     if (samePath(path, settingsPath_))
@@ -745,6 +748,45 @@ std::string App::displayName() const
         return "Untitled";
     const size_t slash = path_.find_last_of("/\\");
     return slash == std::string::npos ? path_ : path_.substr(slash + 1);
+}
+
+void App::updateMeta()
+{
+    if (metaVersion_ == buffer_.version() && metaKind_ == fileType_.kind)
+        return;
+    metaVersion_ = buffer_.version();
+    metaKind_ = fileType_.kind;
+    meta_ = {};
+    metaSummary_.clear();
+    if (fileType_.kind != FileKind::Markdown)
+        return;
+
+    // The block sits at the top, so the start of the file is enough.
+    meta_ = md::parseMeta(buffer_.substr(0, std::min<size_t>(buffer_.size(), 64 * 1024)));
+    if (!meta_.error.empty()) {
+        metaSummary_ = "meta: " + meta_.error;
+        return;
+    }
+    const auto append = [&](std::string_view part) {
+        if (part.empty())
+            return;
+        if (!metaSummary_.empty())
+            metaSummary_ += " \xC2\xB7 "; // middle dot
+        metaSummary_ += part;
+    };
+    std::string tags;
+    for (const std::string& tag : meta_.tags)
+        tags += (tags.empty() ? "#" : " #") + tag;
+    append(tags);
+    append(meta_.shownDate());
+    append(meta_.author);
+    if (metaSummary_.size() > 100) {
+        size_t cut = 97;
+        while (cut > 0 && (static_cast<unsigned char>(metaSummary_[cut]) & 0xC0) == 0x80)
+            --cut; // don't split a UTF-8 sequence
+        metaSummary_.resize(cut);
+        metaSummary_ += "...";
+    }
 }
 
 void App::showError(const std::string& message)
@@ -931,6 +973,7 @@ void App::draw()
 {
     const Uint64 start = SDL_GetPerformanceCounter();
     atlas_->beginFrame();
+    updateMeta();
     updateMenus();
     layout();
 
@@ -975,10 +1018,13 @@ void App::draw()
     SDL_snprintf(right, sizeof(right), "%s    %zu lines    UTF-8%s    %s    %.2f ms", fileType_.name,
                  buffer_.lineCount(), bom_ ? " BOM" : "", crlf_ ? "CRLF" : "LF", lastFrameMs_);
     uiText.draw(pad, textY, left, theme::kStatusText);
-    if (updater_ && updater_->updateReady()) {
-        uiText.draw(std::round(pad * 3.0f + uiText.measure(left)), textY,
-                    "Update ready: applies when you close AtlasWriter", theme::kStatusText);
+    float statusX = std::round(pad * 3.0f + uiText.measure(left));
+    if (!metaSummary_.empty()) {
+        uiText.draw(statusX, textY, metaSummary_, theme::kStatusText);
+        statusX = std::round(statusX + pad * 2.0f + uiText.measure(metaSummary_));
     }
+    if (updater_ && updater_->updateReady())
+        uiText.draw(statusX, textY, "Update ready: applies when you close AtlasWriter", theme::kStatusText);
     uiText.draw(std::round(width - pad - uiText.measure(right)), textY, right, theme::kStatusText);
     uiText.flush();
 
@@ -1004,7 +1050,7 @@ void App::draw()
 
 void App::updateTitle()
 {
-    std::string title = displayName();
+    std::string title = meta_.title.empty() ? displayName() : meta_.title;
     if (modified())
         title += " \xE2\x80\xA2"; // bullet
     title += " - AtlasWriter";
@@ -1052,6 +1098,7 @@ std::string App::baseDirectory() const
 
 void App::documentChanged()
 {
+    metaVersion_ = UINT64_MAX;
     images_->clear();
     markdown_->expandAll();
     markdown_->setImages(images_.get(), baseDirectory(), SDL_GetWindowDisplayScale(window_));

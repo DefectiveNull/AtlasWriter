@@ -1,6 +1,7 @@
 #include "Markdown.h"
 
 #include "markdown/Html.h"
+#include "markdown/Meta.h"
 
 #include <algorithm>
 #include <array>
@@ -248,8 +249,26 @@ std::vector<Block> parse(std::string_view text)
                }) != haystack.end();
     };
 
+    // A ```meta block at the top is metadata, not content: skip it. YAML
+    // front matter isn't read, but shows as a code block instead of rules
+    // around a paragraph of run-together fields.
     size_t lineNo = 0;
-    for (size_t pos = 0; pos <= text.size(); ++lineNo) {
+    size_t start = 0;
+    if (TopBlock top; findMetaBlock(text, top)) {
+        start = top.end;
+        lineNo = top.lines;
+    } else if (findFrontMatter(text, top)) {
+        Block block;
+        block.type = BlockType::Code;
+        block.code.assign(text.substr(top.contentBegin, top.contentEnd - top.contentBegin));
+        blocks.push_back(std::move(block));
+        start = top.end;
+        lineNo = top.lines;
+    }
+    if (start >= text.size() && start > 0)
+        return blocks;
+
+    for (size_t pos = start; pos <= text.size(); ++lineNo) {
         const size_t newline = std::min(text.find('\n', pos), text.size());
         std::string_view line = text.substr(pos, newline - pos);
         pos = newline + 1;

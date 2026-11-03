@@ -16,7 +16,24 @@ std::vector<OutlineEntry> scanOutline(const TextBuffer& buffer)
     char fence = 0; // inside a fenced code block opened with this character
     size_t fenceLength = 0;
 
-    for (size_t line = 0; line < buffer.lineCount(); ++line) {
+    // YAML front matter can hold "# comment" lines; they aren't headings.
+    size_t first = 0;
+    const auto trimmed = [](std::string_view s) {
+        while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+            s.remove_suffix(1);
+        return s;
+    };
+    if (buffer.lineCount() > 1 && trimmed(buffer.line(0, scratch)) == "---") {
+        for (size_t line = 1; line < buffer.lineCount(); ++line) {
+            const std::string_view s = trimmed(buffer.line(line, scratch));
+            if (s == "---" || s == "...") {
+                first = line + 1;
+                break;
+            }
+        }
+    }
+
+    for (size_t line = first; line < buffer.lineCount(); ++line) {
         std::string_view s = buffer.line(line, scratch);
         size_t indent = 0;
         while (indent < s.size() && indent < 4 && s[indent] == ' ')
