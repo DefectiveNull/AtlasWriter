@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -28,7 +29,23 @@ struct WorkspaceContext
     int caretBlinkMs = 530;
     std::string shell; // terminal command; empty = the platform default
     Uint32 terminalEvent = 0;
+    // Pushed (from any thread) when a worker or a native view has news:
+    // a page rendered, a waveform decoded, a web page loaded. The App then
+    // calls onAsync() on every workspace.
+    Uint32 asyncEvent = 0;
+    SDL_Window* window = nullptr;     // parent of native views (web pages)
+    SDL_Renderer* renderer = nullptr; // for textures made outside draw()
+    // The open Document for a path, if any (a web tile shows the edited
+    // text of an HTML file, not what's on disk).
+    std::function<std::shared_ptr<Document>(const std::string& path)> findDocument;
+    // Whether a key runs an AtlasWriter command that should still work
+    // while a web page has the keyboard (tile keys, tabs; not copy/paste).
+    std::function<bool(SDL_Keycode key, SDL_Keymod mod)> isAppShortcut;
 };
+
+// The asyncEvent's code when a web page passes on an app shortcut:
+// data1 holds the key, data2 the modifiers.
+inline constexpr Sint32 kAsyncShortcut = 1;
 
 // The contents of one tile. A workspace has one or more tabs; the tile
 // shows a tab bar once there are two.
@@ -74,6 +91,28 @@ public:
     virtual size_t dropPosition(float, float) { return 0; }
     virtual void insertDropped(size_t, std::string_view) {}
 
+    // File support. A link clicked in the tile, waiting for the App to open
+    // it: an absolute path or a URL, once.
+    virtual bool takeOpenRequest(std::string&) { return false; }
+    // Whether the tile wants to come into focus (its web page was clicked).
+    virtual bool takeFocusRequest() { return false; }
+    // Opens a file or URL as a tab (reader, web and audio tiles). False if
+    // it couldn't be opened; the reason is shown in the tab.
+    virtual bool openTarget(const std::string&) { return false; }
+    // Something finished on another thread (see WorkspaceContext::asyncEvent).
+    // Returns true if the tile needs a redraw.
+    virtual bool onAsync() { return false; }
+    // Milliseconds until the tile wants drawing again (audio playing), or
+    // -1 to wait for events.
+    virtual Sint32 wakeMs() const { return -1; }
+    // Called every frame. `shown`: the tile shows this workspace (false
+    // while it is stashed by a type change); `covered`: a menu, popup or
+    // drag preview is open over the window. Native child windows (web
+    // pages) only show while shown and not covered; audio stops when hidden.
+    virtual void setVisibility(bool /*shown*/, bool /*covered*/) {}
+    // The window came back into focus: files may have changed meanwhile.
+    virtual void refresh() {}
+
 protected:
     const WorkspaceContext& ctx_;
 };
@@ -106,6 +145,7 @@ public:
     Document* dropDocument() override { return &document(); }
     size_t dropPosition(float x, float y) override;
     void insertDropped(size_t pos, std::string_view text) override;
+    bool takeOpenRequest(std::string& target) override;
 
     // Shows `document`: its tab if there is one, else a new tab after the
     // current one (or in place of an untouched Untitled tab).
@@ -168,6 +208,7 @@ public:
     Document* dropDocument() override { return doc_.lock().get(); } // editors keep it alive
     size_t dropPosition(float x, float y) override;
     void insertDropped(size_t pos, std::string_view text) override;
+    bool takeOpenRequest(std::string& target) override;
 
     void follow(const std::shared_ptr<Document>& document);
     const std::shared_ptr<Document> document() const { return doc_.lock(); }

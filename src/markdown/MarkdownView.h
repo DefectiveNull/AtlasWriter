@@ -45,8 +45,10 @@ public:
     // `scale` converts image pixels to screen pixels (the display scale).
     void setImages(ImageCache* images, std::string baseDirectory, float scale);
 
-    // Re-parses only when `version` differs from the last call.
-    void setSource(std::string_view text, uint64_t version);
+    // Re-parses only when `version` differs from the last call. With `html`
+    // the text is a whole HTML page (a web tile, an EPUB chapter): its body
+    // goes through the HTML converter instead of the Markdown parser.
+    void setSource(std::string_view text, uint64_t version, bool html = false);
     uint64_t sourceVersion() const { return version_; }
     void invalidateSource() { version_ = UINT64_MAX; } // e.g. now showing another document
 
@@ -69,8 +71,20 @@ public:
     // collapsed section, not inside it). SIZE_MAX means at the end.
     size_t dropLineAt(float y);
 
-    // Over something that reacts to a click: a heading or a task checkbox.
+    // Over something that reacts to a click: a heading, a task checkbox or
+    // a link (cards included).
     bool isOverClickable(float x, float y) const;
+
+    // A clicked link's target as written, once.
+    bool takeLinkClick(std::string& url);
+    // What a link points at: a URL as it is, or a file as an absolute path
+    // (relative ones against the base directory, %20 decoded). Empty for
+    // an anchor in the same document.
+    std::string resolveLink(const std::string& url) const;
+    void scrollToTop() { scrollY_ = 0.0f; }
+    void scrollToBottom() { scrollY_ = 1e9f; } // clamped when drawn
+    bool atTop() const { return scrollY_ <= 0.5f; }
+    bool atBottom(); // the end of the document is in view
 
     // A clicked task checkbox, waiting for the app to edit the source: the
     // mark's offset and its new character ('x' or ' '). Returns false if
@@ -93,6 +107,7 @@ private:
         bool codeBackground;
         SDL_Texture* image = nullptr; // an image instead of text, sitting on the baseline
         float imageHeight = 0.0f;
+        int link = -1; // part of a link: index into linkUrls_
     };
 
     struct Line
@@ -146,6 +161,7 @@ private:
     void buildHeadingKeys();
     int headingAt(float x, float y) const; // index into headings_, or -1
     int taskAt(float x, float y) const;    // index into tasks_, or -1
+    int linkAt(float x, float y) const;    // index into links_, or -1
     void toggle(size_t block);
     void drawMarker(SDL_Renderer* renderer, float x, float y, bool collapsed, SDL_FColor color) const;
 
@@ -172,6 +188,17 @@ private:
     std::vector<HeadingHit> headings_;     // visible headings, sorted by top
     int hoverHeading_ = -1;
     std::vector<TaskHit> tasks_;           // visible toggleable checkboxes
+    // Clickable links, in document coordinates (x from columnLeft()); a
+    // wrapped link has one per line, a card one for the whole box.
+    struct LinkHit
+    {
+        SDL_FRect rect;
+        size_t url; // index into linkUrls_
+    };
+    std::vector<LinkHit> links_;
+    std::vector<std::string> linkUrls_;
+    std::string clickedLink_;
+    bool linkClicked_ = false;
     size_t pendingTaskPos_ = SIZE_MAX;     // clicked, not yet taken by the app
     char pendingTaskMark_ = ' ';
 

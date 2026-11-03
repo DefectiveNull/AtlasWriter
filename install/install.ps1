@@ -35,7 +35,7 @@ if ($running) {
 
 # Only these go in: a build folder also holds CMake's output.
 $required = 'AtlasWriter.exe', 'icon.svg', 'settings.example.ccl', 'assets'
-$optional = 'AtlasWriterProps.dll', 'LICENSE', 'README.md', 'licenses'
+$optional = 'AtlasWriterProps.dll', 'pdfium.dll', 'LICENSE', 'README.md', 'licenses'
 foreach ($name in $required) {
     if (-not (Test-Path (Join-Path $Source $name))) {
         throw "'$name' is missing from '$Source'."

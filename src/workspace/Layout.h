@@ -5,10 +5,11 @@
 #include <vector>
 
 // What a tile shows.
-enum class WorkspaceType { Editor, Preview, Outline, Terminal };
+enum class WorkspaceType { Editor, Preview, Outline, Terminal, Reader, Web, Audio };
 
 inline constexpr WorkspaceType kWorkspaceTypes[] = {
-    WorkspaceType::Editor, WorkspaceType::Preview, WorkspaceType::Outline, WorkspaceType::Terminal};
+    WorkspaceType::Editor, WorkspaceType::Preview, WorkspaceType::Outline, WorkspaceType::Terminal,
+    WorkspaceType::Reader, WorkspaceType::Web,     WorkspaceType::Audio};
 
 const char* workspaceTypeName(WorkspaceType type); // the key in settings.ccl: "editor", ...
 const char* workspaceTypeLabel(WorkspaceType type); // for people: "Editor", ...

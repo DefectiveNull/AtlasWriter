@@ -81,6 +81,11 @@ std::string folderFor(uint64_t id)
     return current() + "doc-" + std::to_string(id) + "/";
 }
 
+std::string folderNamed(const std::string& name)
+{
+    return current() + name + "/";
+}
+
 void cleanup()
 {
     std::string path = current();

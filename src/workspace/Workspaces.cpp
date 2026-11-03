@@ -522,3 +522,28 @@ bool TerminalWorkspace::hasKeyboard() const
 {
     return focused_;
 }
+
+// ---------------------------------------------------------------------------
+// Links clicked in rendered Markdown
+// ---------------------------------------------------------------------------
+
+bool EditorWorkspace::takeOpenRequest(std::string& target)
+{
+    if (tabs_.empty())
+        return false;
+    MarkdownView& view = *tabs_[active_]->markdown;
+    std::string url;
+    if (!view.takeLinkClick(url))
+        return false;
+    target = view.resolveLink(url);
+    return !target.empty();
+}
+
+bool PreviewWorkspace::takeOpenRequest(std::string& target)
+{
+    std::string url;
+    if (!view_.takeLinkClick(url))
+        return false;
+    target = view_.resolveLink(url);
+    return !target.empty();
+}

@@ -1,4 +1,5 @@
 #include "MarkdownView.h"
+#include "markdown/Html.h"
 
 #include "text/Font.h"
 #include "text/TextRenderer.h"
@@ -78,13 +79,18 @@ void MarkdownView::setImages(ImageCache* images, std::string baseDirectory, floa
     invalidateLayout();
 }
 
-void MarkdownView::setSource(std::string_view text, uint64_t version)
+void MarkdownView::setSource(std::string_view text, uint64_t version, bool html)
 {
     if (version == version_)
         return;
     version_ = version;
     fileDetails_.clear(); // files may have changed too; read them again
-    blocks_ = md::parse(text);
+    if (html) {
+        blocks_.clear();
+        md::parseHtml(md::htmlBody(text), 0, 0, blocks_);
+    } else {
+        blocks_ = md::parse(text);
+    }
     buildHeadingKeys();
     invalidateLayout();
 }
@@ -143,9 +149,53 @@ int MarkdownView::taskAt(float x, float y) const
     return -1;
 }
 
+int MarkdownView::linkAt(float x, float y) const
+{
+    if (!ui::contains(bounds_, x, y))
+        return -1;
+    const float docX = x - columnLeft();
+    const float docY = y - bounds_.y + std::round(scrollY_);
+    for (size_t i = 0; i < links_.size(); ++i) {
+        if (ui::contains(links_[i].rect, docX, docY))
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
 bool MarkdownView::isOverClickable(float x, float y) const
 {
-    return headingAt(x, y) >= 0 || taskAt(x, y) >= 0;
+    return headingAt(x, y) >= 0 || taskAt(x, y) >= 0 || linkAt(x, y) >= 0;
+}
+
+bool MarkdownView::takeLinkClick(std::string& url)
+{
+    if (!linkClicked_)
+        return false;
+    linkClicked_ = false;
+    url = std::move(clickedLink_);
+    clickedLink_.clear();
+    return true;
+}
+
+std::string MarkdownView::resolveLink(const std::string& url) const
+{
+    std::string_view u = url;
+    while (!u.empty() && (u.front() == ' ' || u.front() == '<'))
+        u.remove_prefix(1);
+    while (!u.empty() && (u.back() == ' ' || u.back() == '>'))
+        u.remove_suffix(1);
+    if (u.empty() || u.front() == '#')
+        return {}; // a place in this document
+    // A scheme ("https:", "mailto:"), but not a drive letter ("C:").
+    const size_t colon = u.find(':');
+    const bool scheme = colon != std::string_view::npos && colon > 1
+                     && u.find_first_of("/\\") > colon
+                     && std::all_of(u.begin(), u.begin() + static_cast<std::ptrdiff_t>(colon), [](char c) {
+                            return SDL_isalnum(static_cast<unsigned char>(c)) || c == '+' || c == '-' || c == '.';
+                        });
+    if (scheme && !u.starts_with("file:"))
+        return std::string(u);
+    return resolveImage(std::string(u)); // a file: decoded and made absolute the same way
 }
 
 bool MarkdownView::takeTaskToggle(size_t& pos, char& mark)
@@ -404,6 +454,8 @@ void MarkdownView::layout()
     boxes_.clear();
     headings_.clear();
     tasks_.clear();
+    links_.clear();
+    linkUrls_.clear();
     hoverHeading_ = -1;
     layoutWidth_ = columnWidth();
 
@@ -579,12 +631,18 @@ void MarkdownView::flow(const md::Block& block, float left, float right, float& 
                                                         | ((span.style & md::kStrike) ? kStrikeThrough : 0));
         const bool code = (span.style & md::kCode) != 0;
         const float space = text->advance(' ');
+        int link = -1; // clickable: an index into linkUrls_
+        if ((span.style & md::kLink) && !(span.style & md::kImage) && !span.url.empty()) {
+            linkUrls_.push_back(span.url);
+            link = static_cast<int>(linkUrls_.size() - 1);
+        }
 
         const auto append = [&](std::string_view str, float width) {
             if (!line.runs.empty()) {
                 Run& last = line.runs.back();
                 if (last.text == text && sameColor(last.color, color) && last.decoration == decoration
-                    && last.codeBackground == code && !last.image && std::abs(last.x + last.width - x) < 0.01f) {
+                    && last.codeBackground == code && !last.image && last.link == link
+                    && std::abs(last.x + last.width - x) < 0.01f) {
                     const float seam = seamKern(text->font(), last.str, str);
                     last.str.append(str);
                     last.width += seam + width;
@@ -592,7 +650,7 @@ void MarkdownView::flow(const md::Block& block, float left, float right, float& 
                     return;
                 }
             }
-            line.runs.push_back({text, x, width, std::string(str), color, decoration, code});
+            line.runs.push_back({text, x, width, std::string(str), color, decoration, code, nullptr, 0.0f, link});
             x += width;
         };
 
@@ -678,6 +736,10 @@ void MarkdownView::finishLine(Line& line, float& y, float spacing, TextRenderer*
     line.baseline = std::round((textHeight - natural) * 0.5f + above) + extra;
     y += line.height;
     maxLineHeight_ = std::max(maxLineHeight_, line.height);
+    for (const Run& run : line.runs) {
+        if (run.link >= 0)
+            links_.push_back({{run.x, line.y, run.width, line.height}, static_cast<size_t>(run.link)});
+    }
     lines_.push_back(std::move(line));
 }
 
@@ -799,6 +861,10 @@ void MarkdownView::layoutCard(const md::Block& block, float left, float right, f
     boxes_.push_back({{left + 1.0f, top + 1.0f, width - 2.0f, h - 2.0f}, theme::kEditorBg});
     boxes_.push_back({{left + 1.0f, top + 1.0f, width - 2.0f, h - 2.0f}, theme::kCodeBg});
     boxes_.push_back({{left + 1.0f, top + 1.0f, accent, h - 2.0f}, web ? theme::kLink : theme::kMenuActive});
+    if (!url.empty()) { // the whole card opens the link
+        linkUrls_.push_back(url);
+        links_.push_back({{left, top, width, h}, linkUrls_.size() - 1});
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -973,6 +1039,13 @@ void MarkdownView::layoutTable(const md::Block& table, float left, float right, 
 // Input
 // ---------------------------------------------------------------------------
 
+bool MarkdownView::atBottom()
+{
+    ensureLayout();
+    clampScroll();
+    return scrollY_ + bounds_.h >= contentHeight_ - 1.0f;
+}
+
 void MarkdownView::clampScroll()
 {
     scrollY_ = std::clamp(scrollY_, 0.0f, std::max(0.0f, contentHeight_ - bounds_.h));
@@ -1015,6 +1088,11 @@ bool MarkdownView::handleEvent(const SDL_Event& event)
             const TaskHit& hit = tasks_[static_cast<size_t>(task)];
             pendingTaskPos_ = hit.pos;
             pendingTaskMark_ = hit.done ? ' ' : 'x';
+            return true;
+        }
+        if (const int link = linkAt(event.button.x, event.button.y); link >= 0) {
+            clickedLink_ = linkUrls_[links_[static_cast<size_t>(link)].url];
+            linkClicked_ = true;
             return true;
         }
         const int heading = headingAt(event.button.x, event.button.y);

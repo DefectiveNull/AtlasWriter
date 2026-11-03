@@ -11,6 +11,9 @@ namespace session {
 // The folder for document `id`, with a trailing separator. Not created
 // until something is copied into it.
 std::string folderFor(uint64_t id);
+// A folder of this run for anything else unpacked on the way (an EPUB
+// book), deleted with the rest at exit. `name` must be a plain file name.
+std::string folderNamed(const std::string& name);
 // Deletes this run's folder (at exit).
 void cleanup();
 // Deletes one document's folder (after its first save copied the files

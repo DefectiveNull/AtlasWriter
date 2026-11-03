@@ -48,6 +48,10 @@ enum Command : int {
     kCmdSwitchLayout,
     kCmdSaveLayout,
     kCmdChangeTileType,
+    kCmdShowReader,
+    kCmdShowWeb,
+    kCmdShowAudio,
+    kCmdOpenLocation,
 };
 
 struct CommandInfo
@@ -107,4 +111,8 @@ inline constexpr CommandInfo kCommands[] = {
     {kCmdSwitchLayout, "switch layout", "Ctrl+Alt+L"},
     {kCmdSaveLayout, "save layout as", ""},
     {kCmdChangeTileType, "change tile type", ""},
+    {kCmdShowReader, "reader", ""},
+    {kCmdShowWeb, "web", ""},
+    {kCmdShowAudio, "audio", ""},
+    {kCmdOpenLocation, "open location", "Mod+L"},
 };

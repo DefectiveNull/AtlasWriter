@@ -51,6 +51,12 @@ Span imageSpan(const Tag& img, uint8_t style);
 // Converts an HTML fragment into blocks, appended to `out`.
 void parseHtml(std::string_view html, size_t sourceLine, int quote, std::vector<Block>& out);
 
+// A whole page's <body> contents (all of it when there is no body tag,
+// minus any <head>), and its <title> with entities decoded and spaces
+// collapsed (empty if none).
+std::string_view htmlBody(std::string_view page);
+std::string htmlTitle(std::string_view page);
+
 // Whether a line opens a CommonMark HTML block: <pre>/<script>/<style>/
 // <textarea> (end at the matching close tag), comments (end at "-->"),
 // known block tags (end at a blank line), or any lone complete tag on its

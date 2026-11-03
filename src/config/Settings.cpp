@@ -55,8 +55,9 @@ layout = default
 
 layouts =
   /= The window is a tree of tiles, like the i3 window manager. Each tile
-  /= shows one workspace type: editor, preview (rendered Markdown), outline
-  /= or terminal. "split = horizontal" puts a block's tiles side by side and
+  /= shows one workspace type: editor, preview (rendered Markdown), outline,
+  /= terminal, reader (PDF and EPUB), web (HTML files and websites) or audio.
+  /= "split = horizontal" puts a block's tiles side by side and
   /= "split = vertical" stacks them. A size is a share of the block; tiles
   /= without one share what is left. Repeat a type for two tiles of it, and
   /= nest a block under any other name to split a tile again:

@@ -8,9 +8,6 @@
 
 namespace {
 
-// Types later phases add; named so a layout using one gets a clear warning.
-constexpr const char* kPlannedTypes[] = {"html", "pdf", "audio", "web", "epub"};
-
 bool typeFromName(std::string_view name, WorkspaceType& out)
 {
     for (const WorkspaceType type : kWorkspaceTypes) {
@@ -18,6 +15,15 @@ bool typeFromName(std::string_view name, WorkspaceType& out)
             out = type;
             return true;
         }
+    }
+    // Names the plan used before the reader and web tiles took several kinds each.
+    if (name == "pdf" || name == "epub") {
+        out = WorkspaceType::Reader;
+        return true;
+    }
+    if (name == "html") {
+        out = WorkspaceType::Web;
+        return true;
     }
     return false;
 }
@@ -84,9 +90,6 @@ bool parseSplit(std::string_view body, size_t firstLine, LayoutNode& out, const 
             else if (!e.value.empty() && !parseSize(e.value, tile.size))
                 warnings.push_back(at + ": expected a size like 50%, got \"" + e.value + "\"");
             out.children.push_back(tile);
-        } else if (std::any_of(std::begin(kPlannedTypes), std::end(kPlannedTypes),
-                               [&](const char* name) { return e.key == name; })) {
-            warnings.push_back(at + ": " + e.key + " tiles aren't available yet");
         } else if (e.nested) {
             LayoutNode split;
             if (parseSplit(e.value, e.line + 1, split, at, warnings)) {
@@ -96,7 +99,9 @@ bool parseSplit(std::string_view body, size_t firstLine, LayoutNode& out, const 
                     out.children.push_back(std::move(split));
             }
         } else {
-            warnings.push_back(at + ": unknown workspace type (expected editor, preview, outline or terminal)");
+            warnings.push_back(at
+                               + ": unknown workspace type (expected editor, preview, outline, terminal, reader, web "
+                                 "or audio)");
         }
     }
     return true;
@@ -205,6 +210,12 @@ const char* workspaceTypeLabel(WorkspaceType type)
         return "Outline";
     case WorkspaceType::Terminal:
         return "Terminal";
+    case WorkspaceType::Reader:
+        return "Reader";
+    case WorkspaceType::Web:
+        return "Web";
+    case WorkspaceType::Audio:
+        return "Audio";
     }
     return "";
 }
@@ -216,6 +227,9 @@ const char* workspaceTypeName(WorkspaceType type)
     case WorkspaceType::Preview: return "preview";
     case WorkspaceType::Outline: return "outline";
     case WorkspaceType::Terminal: return "terminal";
+    case WorkspaceType::Reader: return "reader";
+    case WorkspaceType::Web: return "web";
+    case WorkspaceType::Audio: return "audio";
     }
     return "editor";
 }

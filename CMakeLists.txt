@@ -65,10 +65,68 @@ if(UNIX)
     target_link_libraries(nanosvg PUBLIC m)
 endif()
 
+# The audio tile's decoders: dr_wav, dr_mp3, dr_flac and stb_vorbis
+# (public domain / MIT-0).
+add_library(codecs STATIC third_party/dr_libs/dr_libs.c third_party/stb/stb_vorbis.c)
+target_include_directories(codecs SYSTEM PUBLIC third_party/dr_libs third_party/stb)
+if(UNIX)
+    target_link_libraries(codecs PUBLIC m)
+endif()
+
+# PDFium for the reader tile: prebuilt binaries (bblanchon/pdfium-binaries,
+# BSD-3), loaded at run time from next to the executable. Only the library
+# is needed; AtlasWriter declares the few functions it calls itself.
+option(ATLASWRITER_PDFIUM "Download PDFium so the reader tile can show PDFs" ON)
+set(ATLASWRITER_PDFIUM_LIBRARY "")
+if(ATLASWRITER_PDFIUM)
+    set(pdfium_release "chromium%2F8100")
+    if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(pdfium_archive pdfium-win-x64.tgz)
+        set(pdfium_file bin/pdfium.dll)
+    elseif(APPLE)
+        set(pdfium_archive pdfium-mac-univ.tgz)
+        set(pdfium_file lib/libpdfium.dylib)
+    elseif(UNIX AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+        set(pdfium_archive pdfium-linux-x64.tgz)
+        set(pdfium_file lib/libpdfium.so)
+    endif()
+    if(pdfium_archive)
+        include(FetchContent)
+        FetchContent_Declare(pdfium
+            URL https://github.com/bblanchon/pdfium-binaries/releases/download/${pdfium_release}/${pdfium_archive}
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+        FetchContent_MakeAvailable(pdfium)
+        set(ATLASWRITER_PDFIUM_LIBRARY "${pdfium_SOURCE_DIR}/${pdfium_file}")
+    else()
+        message(STATUS "No prebuilt PDFium for this platform: PDFs won't open")
+    endif()
+endif()
+
+# WebView2 for websites in the web tile (Windows): the SDK's headers and its
+# static loader, from the NuGet package. Pages need the WebView2 Runtime,
+# which comes with Microsoft Edge on Windows 10 and 11.
+option(ATLASWRITER_WEBVIEW2 "Show websites in web tiles with WebView2 (Windows)" ON)
+set(ATLASWRITER_USE_WEBVIEW2 OFF)
+if(ATLASWRITER_WEBVIEW2 AND WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    include(FetchContent)
+    FetchContent_Declare(webview2
+        URL https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.4314.35
+        DOWNLOAD_NAME webview2.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(webview2)
+    set(ATLASWRITER_USE_WEBVIEW2 ON)
+endif()
+
 add_executable(AtlasWriter
     src/main.cpp
     src/App.cpp
     src/App.h
+    src/audio/AudioDecoder.cpp
+    src/audio/AudioDecoder.h
+    src/audio/AudioWorkspace.cpp
+    src/audio/AudioWorkspace.h
     src/config/Ccl.cpp
     src/config/Ccl.h
     src/config/Commands.h
@@ -104,6 +162,14 @@ add_executable(AtlasWriter
     src/markdown/MarkdownView.h
     src/markdown/OutlinePanel.cpp
     src/markdown/OutlinePanel.h
+    src/reader/Epub.cpp
+    src/reader/Epub.h
+    src/reader/Pdf.cpp
+    src/reader/Pdf.h
+    src/reader/ReaderWorkspace.cpp
+    src/reader/ReaderWorkspace.h
+    src/reader/Zip.cpp
+    src/reader/Zip.h
     src/terminal/Pty.cpp
     src/terminal/Pty.h
     src/terminal/TerminalScreen.cpp
@@ -127,6 +193,8 @@ add_executable(AtlasWriter
     src/ui/Picker.h
     src/ui/PopupMenu.cpp
     src/ui/PopupMenu.h
+    src/ui/Toolbar.cpp
+    src/ui/Toolbar.h
     src/update/Sha256.h
     src/update/Updater.cpp
     src/update/Updater.h
@@ -138,6 +206,10 @@ add_executable(AtlasWriter
     src/workspace/TileTree.h
     src/workspace/Workspace.h
     src/workspace/Workspaces.cpp
+    src/web/WebView.cpp
+    src/web/WebView.h
+    src/web/WebWorkspace.cpp
+    src/web/WebWorkspace.h
 )
 
 # A GUI executable: as a console one, Windows groups the console with the main
@@ -149,7 +221,18 @@ endif()
 
 target_compile_definitions(AtlasWriter PRIVATE ATLASWRITER_VERSION="${PROJECT_VERSION}")
 target_include_directories(AtlasWriter PRIVATE src)
-target_link_libraries(AtlasWriter PRIVATE ${ATLASWRITER_SDL_TARGET} stb nanosvg)
+target_link_libraries(AtlasWriter PRIVATE ${ATLASWRITER_SDL_TARGET} stb nanosvg codecs)
+if(ATLASWRITER_USE_WEBVIEW2)
+    target_compile_definitions(AtlasWriter PRIVATE ATLASWRITER_WEBVIEW2)
+    target_include_directories(AtlasWriter SYSTEM PRIVATE "${webview2_SOURCE_DIR}/build/native/include")
+    target_link_libraries(AtlasWriter PRIVATE "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib"
+                          version shlwapi)
+endif()
+if(ATLASWRITER_PDFIUM_LIBRARY)
+    add_custom_command(TARGET AtlasWriter POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ATLASWRITER_PDFIUM_LIBRARY}" "$<TARGET_FILE_DIR:AtlasWriter>")
+endif()
 
 # Fonts etc. are loaded relative to the executable
 add_custom_command(TARGET AtlasWriter POST_BUILD
@@ -202,6 +285,14 @@ endif()
 install(FILES third_party/nanosvg/LICENSE.txt DESTINATION licenses RENAME nanosvg.txt)
 if(NOT ATLASWRITER_USE_SYSTEM_SDL)
     install(FILES "${sdl3_SOURCE_DIR}/LICENSE.txt" DESTINATION licenses RENAME SDL3.txt)
+endif()
+if(ATLASWRITER_PDFIUM_LIBRARY)
+    install(FILES "${ATLASWRITER_PDFIUM_LIBRARY}" DESTINATION .)
+    install(FILES "${pdfium_SOURCE_DIR}/LICENSE" DESTINATION licenses RENAME PDFium.txt)
+    install(DIRECTORY "${pdfium_SOURCE_DIR}/licenses/" DESTINATION licenses/PDFium)
+endif()
+if(ATLASWRITER_USE_WEBVIEW2)
+    install(FILES "${webview2_SOURCE_DIR}/LICENSE.txt" DESTINATION licenses RENAME WebView2.txt)
 endif()
 
 if(MSVC)

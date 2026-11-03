@@ -842,6 +842,76 @@ void parseHtml(std::string_view html, size_t sourceLine, int quote, std::vector<
     Converter(out, sourceLine, quote).run(html);
 }
 
+namespace {
+
+// Case-insensitive find of an ASCII, lowercase `needle`.
+size_t findTag(std::string_view s, std::string_view needle, size_t from = 0)
+{
+    for (size_t i = from; i + needle.size() <= s.size(); ++i) {
+        size_t k = 0;
+        while (k < needle.size() && lower(s[i + k]) == needle[k])
+            ++k;
+        if (k == needle.size())
+            return i;
+    }
+    return std::string_view::npos;
+}
+
+// The start of the tag's contents: past the '>' of an opening tag like
+// "<body class=x>", where `name` is "<body". npos if there is none.
+size_t afterOpeningTag(std::string_view s, std::string_view name)
+{
+    for (size_t at = findTag(s, name); at != std::string_view::npos; at = findTag(s, name, at + 1)) {
+        const size_t next = at + name.size();
+        if (next < s.size() && (isWhite(s[next]) || s[next] == '>')) {
+            const size_t close = s.find('>', next);
+            return close == std::string_view::npos ? std::string_view::npos : close + 1;
+        }
+    }
+    return std::string_view::npos;
+}
+
+} // namespace
+
+std::string_view htmlBody(std::string_view page)
+{
+    size_t start = afterOpeningTag(page, "<body");
+    if (start == std::string_view::npos) {
+        const size_t head = findTag(page, "</head>");
+        start = head == std::string_view::npos ? 0 : head + 7;
+    }
+    const size_t end = findTag(page, "</body", start);
+    return page.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+}
+
+std::string htmlTitle(std::string_view page)
+{
+    const size_t start = afterOpeningTag(page, "<title");
+    if (start == std::string_view::npos)
+        return {};
+    const size_t end = findTag(page, "</title", start);
+    const std::string_view raw = page.substr(start, end == std::string_view::npos ? 0 : end - start);
+    std::string out;
+    for (size_t i = 0; i < raw.size();) {
+        if (raw[i] == '&') {
+            if (const size_t n = decodeEntity(raw, i, out)) {
+                i += n;
+                continue;
+            }
+        }
+        if (isWhite(raw[i])) {
+            if (!out.empty() && out.back() != ' ')
+                out += ' ';
+        } else {
+            out += raw[i];
+        }
+        ++i;
+    }
+    while (!out.empty() && out.back() == ' ')
+        out.pop_back();
+    return out;
+}
+
 HtmlBlockStart htmlBlockStart(std::string_view line, std::string& endMarker)
 {
     size_t indent = 0;

@@ -17,11 +17,21 @@ AtlasWriter also has support for viewing/editing code, it can detect when a code
 ## Tiles and layouts
 
 The window is split into tiles, in the style of the i3 window manager.
-- **What a tile shows:** one workspace, which is an editor, a rendered markdown preview, an outline of the headings, or a terminal. A tile can hold several tabs.
+- **What a tile shows:** one workspace, which is an editor, a rendered markdown preview, an outline of the headings, a terminal, a reader for PDFs and EPUBs, a web view, or an audio player. A tile can hold several tabs.
 - **Changing a tile:** the button at the left of its header switches what it shows, and switching back brings back what it had.
 - **Moving tiles with the mouse:** drag a tile by its header onto another tile to dock it beside that tile or swap the two.
 - **From the keyboard:** the Window menu and Alt+arrow keys split, focus, move and resize tiles.
 - **Saved layouts:** layouts live in `settings.ccl` under `layouts`. Window > Switch Layout... changes to one of them, and Window > Save Layout As... adds the current arrangement.
+
+## Files, links and embeds
+
+- **Embeds:** drop a file or a link onto a document, or paste a URL, and it's written as a link. Images show inline in the rendered view; other files and websites show as cards. Files are copied into an `assets` folder next to the document.
+- **Opening things:** click a link or a card in the rendered view, or use File > Open, and it opens in the right kind of tile, which is split off the current one if there isn't one yet:
+  - **PDFs and EPUB books** open in the reader. PDFs are drawn by [PDFium](https://pdfium.googlesource.com/pdfium/), with zoom (+, -, 0, Ctrl+wheel). Books show one chapter at a time; the arrow keys or paging past the end turn chapters.
+  - **Audio** (WAV, Ogg Vorbis, MP3, FLAC) opens in the audio player, with a waveform to click on, play/pause (Space), seeking (arrows), speed ([ and ]) and volume.
+  - **HTML files** open in the web tile, drawn by AtlasWriter itself, updating live if the file is open in an editor. On Windows, "Browser view" shows them in a real browser engine instead.
+  - **Websites** open in the web tile through Microsoft Edge's WebView2 on Windows, with back, forward, reload and an address bar (Ctrl+L). Elsewhere they open in your web browser.
+  - **Text, Markdown and code** open in the editor, and anything else in the program your system uses for it.
 
 ## And it's all driven by a novel and elegant configuration language
 

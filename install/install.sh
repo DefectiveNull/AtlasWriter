@@ -40,7 +40,7 @@ for name in AtlasWriter icon.svg settings.example.ccl assets; do
 done
 
 mkdir -p "$target"
-for name in AtlasWriter icon.svg settings.example.ccl assets LICENSE README.md licenses; do
+for name in AtlasWriter icon.svg settings.example.ccl assets libpdfium.so LICENSE README.md licenses; do
     rm -rf "${target:?}/$name"
     if [ -e "$source/$name" ]; then
         cp -R "$source/$name" "$target/$name"

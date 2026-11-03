@@ -85,6 +85,15 @@ private:
     // Documents and routing
     void newDocument();
     void openPath(const std::string& path); // its tab if open, else a new tab in the editor used last
+    // File support: where a file or URL opens. Websites and local HTML go to
+    // a web tile, PDFs and EPUBs to a reader, audio to an audio tile, text to
+    // the editor, anything else to the system. `source` is the tile it was
+    // clicked in (a new tile splits it); `rendered` opens Markdown rendered.
+    void openTarget(const std::string& target, Tile* source = nullptr, bool rendered = false);
+    // A tile of `type`: the focused one if it is, else the first one, else
+    // a new one splitting `source` (or the focused tile) along its longer side.
+    Tile* tileFor(WorkspaceType type, Tile* source);
+    void onAsync(const SDL_UserEvent& event); // see WorkspaceContext::asyncEvent
     std::shared_ptr<Document> currentDocument() const;
     void showError(const std::string& message);
 
@@ -174,6 +183,8 @@ private:
     Uint32 dialogEvent_ = 0; // custom event type for file dialog results
     Uint32 imageEvent_ = 0;  // ... finished image decodes
     Uint32 terminalEvent_ = 0; // ... and terminal output
+    Uint32 asyncEvent_ = 0;    // ... and workers and web pages (WorkspaceContext::asyncEvent)
+    Tile* addressTile_ = nullptr; // the web tile whose address is being typed
 
     bool windowFocused_ = true;
     bool dialogOpen_ = false;

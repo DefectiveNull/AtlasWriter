@@ -1,6 +1,12 @@
 #include "App.h"
 
+#include "audio/AudioDecoder.h"
+#include "audio/AudioWorkspace.h"
 #include "config/Commands.h"
+#include "reader/Pdf.h"
+#include "reader/ReaderWorkspace.h"
+#include "web/WebView.h"
+#include "web/WebWorkspace.h"
 #include "text/GlyphAtlas.h"
 #include "text/TextRenderer.h"
 #include "ui/Draw.h"
@@ -29,6 +35,7 @@ enum DialogKind : Sint32 {
 enum PickerId : int {
     kPickLayout = 1,
     kPickSaveLayout,
+    kPickAddress,
 };
 
 constexpr float kHeadingScale[] = {2.0f, 1.6f, 1.3f, 1.12f}; // h1..h4, relative to the reading font
@@ -39,16 +46,19 @@ constexpr float kResizeStep = 0.05f; // of the split, per Alt+Ctrl+arrow
 // (the extension lists are static strings too).
 const SDL_DialogFileFilter* fileFilters()
 {
+    static const std::string all = std::string(supportedExtensions()) + ";pdf;epub;wav;wave;ogg;oga;mp3;flac";
     static const SDL_DialogFileFilter filters[] = {
-        {"All supported files", supportedExtensions()},
+        {"All supported files", all.c_str()},
         {"Markdown", markdownExtensions()},
         {"Source code", codeExtensions()},
         {"Plain text", "txt;text;log"},
+        {"PDF and EPUB", "pdf;epub"},
+        {"Audio", "wav;wave;ogg;oga;mp3;flac"},
         {"All files", "*"},
     };
     return filters;
 }
-constexpr int kFileFilterCount = 5;
+constexpr int kFileFilterCount = 7;
 
 SDL_Time modifyTime(const std::string& path)
 {
@@ -142,8 +152,9 @@ App::~App()
     // GPU resources must go before the renderer that owns them.
     updater_.reset();                        // cancels any download
     focused_ = lastEditor_ = nullptr;
-    std::unique_ptr<TileTree::Node> root = tiles_.takeRoot(); // stops shells, frees views
+    std::unique_ptr<TileTree::Node> root = tiles_.takeRoot(); // stops shells and players, frees views
     root.reset();
+    pdf::shutdown(); // after every PDF closed
     images_.reset(); // joins the decode thread, frees textures
     session::cleanup(); // files dropped into documents that were never saved
     typeMenu_.reset();
@@ -188,10 +199,11 @@ bool App::init(int argc, char* argv[])
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     SDL_Log("Renderer: %s", SDL_GetRendererName(renderer_));
 
-    dialogEvent_ = SDL_RegisterEvents(4);
+    dialogEvent_ = SDL_RegisterEvents(5);
     imageEvent_ = dialogEvent_ + 1;
     terminalEvent_ = dialogEvent_ + 2;
     updateEvent_ = dialogEvent_ + 3;
+    asyncEvent_ = dialogEvent_ + 4;
     if (dialogEvent_ == 0) {
         SDL_Log("SDL_RegisterEvents failed: %s", SDL_GetError());
         return false;
@@ -221,7 +233,43 @@ bool App::init(int argc, char* argv[])
     ctx_.markdown.heading[5] = text_[kFaceBold].get();
     ctx_.images = images_.get();
     ctx_.terminalEvent = terminalEvent_;
+    ctx_.asyncEvent = asyncEvent_;
+    ctx_.window = window_;
+    ctx_.renderer = renderer_;
     ctx_.displayScale = SDL_GetWindowDisplayScale(window_);
+    ctx_.findDocument = [this](const std::string& path) {
+        std::shared_ptr<Document> found;
+        forEachEditor([&](Tile&, EditorWorkspace& editor, bool) {
+            for (size_t i = 0; i < editor.tabCount() && !found; ++i) {
+                const auto& doc = editor.documentAt(i);
+                if (!doc->path().empty() && samePath(doc->path(), path))
+                    found = doc;
+            }
+        });
+        return found;
+    };
+    // Keys a web page passes on: tile, tab and file commands, but not the
+    // ones the page has its own meaning for (editing, zoom).
+    ctx_.isAppShortcut = [this](SDL_Keycode key, SDL_Keymod mod) {
+        SDL_KeyboardEvent event{};
+        event.key = key;
+        event.mod = mod;
+        switch (settings_.commandFor(event)) {
+        case kCmdNone:
+        case kCmdUndo:
+        case kCmdRedo:
+        case kCmdCut:
+        case kCmdCopy:
+        case kCmdPaste:
+        case kCmdSelectAll:
+        case kCmdZoomIn:
+        case kCmdZoomOut:
+        case kCmdZoomReset:
+            return false;
+        default:
+            return true;
+        }
+    };
 
     menu_ = std::make_unique<MenuBar>(fonts_[kFaceCode], *text_[kFaceCode]);
     picker_ = std::make_unique<Picker>(*text_[kFaceCode]);
@@ -263,8 +311,10 @@ bool App::init(int argc, char* argv[])
             file = argv[i];
     }
 
+    // PDFs, books and audio open in their own tiles once the layout is up.
+    const bool elsewhere = file && (ReaderWorkspace::handles(file) || AudioDecoder::handles(file));
     auto document = std::make_shared<Document>();
-    if (file) {
+    if (file && !elsewhere) {
         std::string error;
         if (!document->load(file, error))
             showError(std::string("Could not open \"") + file + "\":\n" + error);
@@ -273,6 +323,8 @@ bool App::init(int argc, char* argv[])
     if (!startup)
         startup = findLayout(settings_.layouts, "default");
     applyLayout(*startup, {document}, document);
+    if (elsewhere)
+        openPath(file);
     if (preview) {
         if (EditorWorkspace* editor = targetEditor())
             editor->setPreview(true);
@@ -297,7 +349,12 @@ void App::run()
 
         SDL_Event event;
         const EditorWorkspace* editor = focusedEditor();
-        const Sint32 timeout = editor && windowFocused_ ? editor->blinkTimeoutMs() : -1;
+        Sint32 timeout = editor && windowFocused_ ? editor->blinkTimeoutMs() : -1;
+        for (Tile* tile : tiles_.tiles()) { // e.g. a playing audio tile's playhead
+            const Sint32 wake = tile->workspace->wakeMs();
+            if (wake >= 0 && (timeout < 0 || wake < timeout))
+                timeout = wake;
+        }
         const bool gotEvent = timeout < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, timeout);
         if (!gotEvent) {
             dirty_ = true; // caret blink
@@ -332,6 +389,10 @@ void App::handleEvent(SDL_Event& event)
         }
         return;
     }
+    if (event.type == asyncEvent_) {
+        onAsync(event.user);
+        return;
+    }
     if (event.type == terminalEvent_) {
         // Hidden terminals read their output too, so their screens keep up.
         tiles_.forEachTile([&](Tile& tile) {
@@ -354,6 +415,7 @@ void App::handleEvent(SDL_Event& event)
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
         checkSettingsFile(); // maybe edited in another program
         windowFocused_ = true;
+        tiles_.forEachTile([](Tile& tile) { tile.workspace->refresh(); });
         updateFocus();
         break;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
@@ -416,6 +478,9 @@ void App::handleEvent(SDL_Event& event)
         handleDrop(event.drop.x, event.drop.y);
         return;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        // A click in AtlasWriter's own window (not inside a web page, which
+        // gets its own clicks) takes the keyboard back from the page.
+        WebView::reclaimFocus(window_);
         if (tileDrag_ != TileDrag::None) { // another button cancels the drag
             endTileDrag(false);
             updateMouseCursor(event.button.x, event.button.y);
@@ -573,7 +638,25 @@ void App::handleMouse(const SDL_Event& event)
 
 void App::afterTileEvent(Tile& tile)
 {
+    // Links clicked in the tile (rendered Markdown, a web page, a book).
+    std::string target;
+    while (tile.workspace->takeOpenRequest(target)) {
+        const bool rendered = tile.workspace->type() == WorkspaceType::Preview
+                           || (tile.workspace->type() == WorkspaceType::Editor
+                               && static_cast<EditorWorkspace&>(*tile.workspace).previewing());
+        openTarget(target, &tile, rendered);
+        dirty_ = true;
+        if (!tiles_.contains(&tile))
+            return;
+    }
     switch (tile.workspace->type()) {
+    case WorkspaceType::Web:
+        if (static_cast<WebWorkspace&>(*tile.workspace).takeAddressRequest()) {
+            addressTile_ = &tile;
+            picker_->open(kPickAddress, "Address:", {}, true);
+            dirty_ = true;
+        }
+        break;
     case WorkspaceType::Outline: {
         size_t line = 0;
         if (static_cast<OutlineWorkspace&>(*tile.workspace).takeJump(line)) {
@@ -760,6 +843,20 @@ void App::runCommand(int command)
         if (focused_)
             openTypeMenu(focused_, true);
         break;
+    case kCmdShowReader:
+        toggleTile(WorkspaceType::Reader);
+        break;
+    case kCmdShowWeb:
+        toggleTile(WorkspaceType::Web);
+        break;
+    case kCmdShowAudio:
+        toggleTile(WorkspaceType::Audio);
+        break;
+    case kCmdOpenLocation:
+        // In a web tile, its address; anywhere else, a page for a new tab.
+        addressTile_ = focused_ && focused_->workspace->type() == WorkspaceType::Web ? focused_ : nullptr;
+        picker_->open(kPickAddress, "Open location (URL, file or search):", {}, true);
+        break;
     case kCmdSwitchLayout: {
         std::vector<std::string> names;
         for (const Layout& l : settings_.layouts)
@@ -796,6 +893,18 @@ void App::onPicked(int id, const std::string& choice)
             return;
         }
         saveLayoutAs(choice);
+    } else if (id == kPickAddress) {
+        const std::string address = WebWorkspace::addressFor(choice);
+        Tile* tile = addressTile_;
+        addressTile_ = nullptr;
+        if (address.empty())
+            return;
+        if (tile && tiles_.contains(tile) && tile->workspace->type() == WorkspaceType::Web) {
+            static_cast<WebWorkspace&>(*tile->workspace).navigate(address);
+            focusTile(tile);
+        } else {
+            openTarget(address);
+        }
     }
     dirty_ = true;
 }
@@ -1070,6 +1179,11 @@ void App::newDocument()
 
 void App::openPath(const std::string& path)
 {
+    // PDFs, books and audio aren't text: they open in their own tiles.
+    if (ReaderWorkspace::handles(path) || AudioDecoder::handles(path)) {
+        openTarget(path);
+        return;
+    }
     // Already open: go to its tab.
     for (Tile* tile : tiles_.tiles()) {
         if (tile->workspace->type() != WorkspaceType::Editor)
@@ -1107,6 +1221,147 @@ void App::openPath(const std::string& path)
     dirty_ = true;
 }
 
+void App::openTarget(const std::string& target, Tile* source, bool rendered)
+{
+    if (target.empty())
+        return;
+    if (source && !tiles_.contains(source))
+        source = nullptr;
+
+    const auto openIn = [&](WorkspaceType type, const std::string& what) {
+        Tile* tile = tileFor(type, source);
+        tile->workspace->openTarget(what);
+        focusTile(tile);
+        layout();
+        dirty_ = true;
+    };
+
+    if (WebWorkspace::isWebUrl(target)) {
+        if (WebView::available())
+            openIn(WorkspaceType::Web, target);
+        else if (!SDL_OpenURL(target.c_str()))
+            showError("Could not open " + target + ":\n" + SDL_GetError());
+        return;
+    }
+    // Other schemes (mailto:, ...) belong to the system.
+    const size_t colon = target.find(':');
+    const bool scheme = colon != std::string::npos && colon > 1 && target.find_first_of("/\\") > colon;
+    if (scheme) {
+        if (!SDL_OpenURL(target.c_str()))
+            showError("Could not open " + target + ":\n" + SDL_GetError());
+        return;
+    }
+
+    SDL_PathInfo info{};
+    if (!SDL_GetPathInfo(target.c_str(), &info)) {
+        showError("\"" + target + "\" doesn't exist.");
+        return;
+    }
+    if (info.type == SDL_PATHTYPE_DIRECTORY || embed::isImage(target)) {
+        // A folder, or an image: the file manager or the system's viewer.
+        std::string url = target;
+        for (char& c : url) {
+            if (c == '\\')
+                c = '/';
+        }
+        url = "file://" + std::string(url[0] == '/' ? "" : "/") + embed::encodeLinkPath(url);
+        if (!SDL_OpenURL(url.c_str()))
+            showError("Could not open " + target + ":\n" + SDL_GetError());
+        return;
+    }
+    if (ReaderWorkspace::handles(target)) {
+        openIn(WorkspaceType::Reader, target);
+        return;
+    }
+    if (AudioDecoder::handles(target)) {
+        openIn(WorkspaceType::Audio, target);
+        return;
+    }
+    if (WebWorkspace::handles(target)) {
+        openIn(WorkspaceType::Web, target);
+        return;
+    }
+    // Text, Markdown and code go to the editor; anything that doesn't look
+    // like text goes to the system's default app.
+    const FileType type = detectFileType(target);
+    bool text = type.kind != FileKind::Text || type.name != std::string_view("Plain Text");
+    if (!text) {
+        // Unknown extension: text if its start has no NUL bytes.
+        if (SDL_IOStream* io = SDL_IOFromFile(target.c_str(), "rb")) {
+            char head[4096];
+            const size_t n = SDL_ReadIO(io, head, sizeof(head));
+            SDL_CloseIO(io);
+            text = std::find(head, head + n, '\0') == head + n;
+        }
+    }
+    if (!text) {
+        std::string url = target;
+        for (char& c : url) {
+            if (c == '\\')
+                c = '/';
+        }
+        url = "file://" + std::string(url[0] == '/' ? "" : "/") + embed::encodeLinkPath(url);
+        if (!SDL_OpenURL(url.c_str()))
+            showError("Could not open " + target + ":\n" + SDL_GetError());
+        return;
+    }
+    openPath(target);
+    if (rendered && type.kind == FileKind::Markdown) {
+        if (EditorWorkspace* editor = focusedEditor())
+            editor->setPreview(true);
+    }
+}
+
+App::Tile* App::tileFor(WorkspaceType type, Tile* source)
+{
+    if (focused_ && focused_->workspace->type() == type)
+        return focused_;
+    for (Tile* tile : tiles_.tiles()) {
+        if (tile->workspace->type() == type)
+            return tile;
+    }
+    Tile* anchor = source ? source : focused_ ? focused_ : tiles_.tiles().front();
+    layout();
+    const bool horizontal = anchor->rect.w >= anchor->rect.h;
+    Tile* tile = tiles_.split(anchor, horizontal, makeWorkspace(type), 0.5f);
+    tile->workspace->styleChanged();
+    layout();
+    return tile;
+}
+
+void App::onAsync(const SDL_UserEvent& event)
+{
+    if (event.code == kAsyncShortcut) {
+        // A key pressed in a web page that runs one of AtlasWriter's commands.
+        SDL_KeyboardEvent key{};
+        key.key = static_cast<SDL_Keycode>(reinterpret_cast<uintptr_t>(event.data1));
+        key.mod = static_cast<SDL_Keymod>(reinterpret_cast<uintptr_t>(event.data2));
+        WebView::reclaimFocus(window_);
+        const Command command = settings_.commandFor(key);
+        if (command != kCmdNone)
+            runCommand(command);
+        return;
+    }
+    // Hidden workspaces hear it too: a stashed reader's pages still arrive.
+    std::vector<Tile*> focus;
+    tiles_.forEachTile([&](Tile& tile) {
+        dirty_ |= tile.workspace->onAsync();
+        for (const auto& hidden : tile.stash)
+            hidden->onAsync();
+        if (tile.workspace->takeFocusRequest())
+            focus.push_back(&tile);
+    });
+    for (Tile* tile : focus) {
+        if (tiles_.contains(tile) && tile != focused_)
+            focusTile(tile);
+    }
+    for (Tile* tile : tiles_.tiles()) { // links a page asked to open (new windows are tabs already)
+        if (tiles_.contains(tile))
+            afterTileEvent(*tile);
+    }
+    dirty_ = true;
+}
+
 std::shared_ptr<Document> App::currentDocument() const
 {
     const EditorWorkspace* editor = targetEditor();
@@ -1137,6 +1392,12 @@ std::unique_ptr<Workspace> App::makeWorkspace(WorkspaceType type)
         return std::make_unique<TerminalWorkspace>(
             ctx_, doc && !doc->directory().empty() ? doc->directory() : workingDirectory());
     }
+    case WorkspaceType::Reader:
+        return std::make_unique<ReaderWorkspace>(ctx_);
+    case WorkspaceType::Web:
+        return std::make_unique<WebWorkspace>(ctx_);
+    case WorkspaceType::Audio:
+        return std::make_unique<AudioWorkspace>(ctx_);
     }
     return std::make_unique<EditorWorkspace>(ctx_);
 }
@@ -1364,6 +1625,18 @@ void App::toggleTile(WorkspaceType type)
         focusTile(tile);
         break;
     }
+    case WorkspaceType::Reader:
+    case WorkspaceType::Web:
+    case WorkspaceType::Audio: {
+        Tile* tile = tiles_.split(anchor, true, makeWorkspace(type), 0.5f);
+        tile->workspace->styleChanged();
+        // A web tile opened beside an HTML file shows that file.
+        const std::shared_ptr<Document> doc = currentDocument();
+        if (type == WorkspaceType::Web && doc && !doc->path().empty() && WebWorkspace::handles(doc->path()))
+            tile->workspace->openTarget(doc->path());
+        focusTile(tile);
+        break;
+    }
     }
     updateFocus();
 }
@@ -1407,6 +1680,8 @@ void App::setTileType(Tile* tile, WorkspaceType type)
         std::unique_ptr<Workspace> workspace = makeWorkspace(t);
         if (t == WorkspaceType::Editor)
             static_cast<EditorWorkspace&>(*workspace).open(doc ? doc : std::make_shared<Document>());
+        else if (t == WorkspaceType::Web && doc && !doc->path().empty() && WebWorkspace::handles(doc->path()))
+            workspace->openTarget(doc->path()); // the HTML file being edited
         return workspace;
     });
     if (tile == lastEditor_ && type != WorkspaceType::Editor)
@@ -1522,6 +1797,41 @@ void App::handleDrop(float x, float y)
         focusTile(tile);
         dirty_ = true;
         return;
+    }
+
+    // Reader, web and audio tiles open what they can show; the rest of the
+    // drop embeds as usual.
+    if (tile) {
+        const WorkspaceType type = tile->workspace->type();
+        const auto opens = [&](const DroppedItem& item) {
+            switch (type) {
+            case WorkspaceType::Reader:
+                return item.file && ReaderWorkspace::handles(item.data);
+            case WorkspaceType::Audio:
+                return item.file && AudioDecoder::handles(item.data);
+            case WorkspaceType::Web:
+                return item.file ? WebWorkspace::handles(item.data) : WebWorkspace::isWebUrl(item.data);
+            default:
+                return false;
+            }
+        };
+        std::vector<DroppedItem> rest;
+        bool opened = false;
+        for (DroppedItem& item : expanded) {
+            if (opens(item)) {
+                tile->workspace->openTarget(item.data);
+                opened = true;
+            } else {
+                rest.push_back(std::move(item));
+            }
+        }
+        if (opened) {
+            focusTile(tile);
+            dirty_ = true;
+        }
+        expanded = std::move(rest);
+        if (expanded.empty())
+            return;
     }
 
     Workspace* target = tile ? tile->workspace.get() : nullptr;
@@ -1716,6 +2026,16 @@ void App::draw()
     SDL_SetRenderDrawColorFloat(renderer_, theme::kEditorBg.r, theme::kEditorBg.g, theme::kEditorBg.b, 1.0f);
     SDL_RenderClear(renderer_);
 
+    // Web pages are native windows on top of everything SDL draws: they hide
+    // while a menu, popup or drag preview has to show over them.
+    const bool covered = menu_->isOpen() || picker_->isOpen() || typeMenu_->isOpen()
+                      || tileDrag_ == TileDrag::Moving || showAtlas_;
+    tiles_.forEachTile([&](Tile& tile) {
+        tile.workspace->setVisibility(true, covered);
+        for (const auto& hidden : tile.stash)
+            hidden->setVisibility(false, covered);
+    });
+
     tiles_.draw(renderer_, uiText, focused_, typeMenuTile_);
 
     // A tile being dragged: dim it, and shade where it would land.
@@ -1856,6 +2176,7 @@ void App::buildMenus()
                     {
                         item("New", kCmdNew),
                         item("Open...", kCmdOpen),
+                        item("Open Location...", kCmdOpenLocation),
                         {},
                         item("Save", kCmdSave),
                         item("Save As...", kCmdSaveAs),
@@ -1881,6 +2202,9 @@ void App::buildMenus()
                         item("Preview", kCmdShowPreview),
                         item("Outline", kCmdToggleOutline),
                         item("Terminal", kCmdToggleTerminal),
+                        item("Reader (PDF, EPUB)", kCmdShowReader),
+                        item("Web", kCmdShowWeb),
+                        item("Audio", kCmdShowAudio),
                         {},
                         item("Rendered Markdown", kCmdTogglePreview),
                         item("Collapse All Headings", kCmdCollapseAll),
