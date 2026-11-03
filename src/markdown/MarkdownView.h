@@ -46,6 +46,8 @@ public:
 
     // Re-parses only when `version` differs from the last call.
     void setSource(std::string_view text, uint64_t version);
+    uint64_t sourceVersion() const { return version_; }
+    void invalidateSource() { version_ = UINT64_MAX; } // e.g. now showing another document
 
     void setBounds(const SDL_FRect& bounds) { bounds_ = bounds; }
 

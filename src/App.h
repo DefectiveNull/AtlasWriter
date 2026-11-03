@@ -2,24 +2,21 @@
 
 #include <SDL3/SDL.h>
 
-#include "editor/FileType.h"
 #include "config/Settings.h"
-#include "editor/TextBuffer.h"
-#include "markdown/Meta.h"
 #include "text/Font.h"
+#include "workspace/TileTree.h"
+#include "workspace/Workspace.h"
 
 #include <array>
+#include <deque>
 #include <memory>
 #include <string>
 
-class EditorView;
-struct EditorStyle;
 class GlyphAtlas;
 class ImageCache;
-class MarkdownView;
-class OutlinePanel;
-class TerminalView;
 class MenuBar;
+class Picker;
+class PopupMenu;
 class TextBatch;
 class TextRenderer;
 class Updater;
@@ -37,8 +34,17 @@ public:
     void run();
 
 private:
-    // What to do once unsaved changes have been dealt with.
-    enum class Action { None, New, Open, Preferences, Exit };
+    using Tile = TileTree::Node;
+
+    // Something that can drop documents with unsaved changes, so it runs
+    // once those have been dealt with (see request()).
+    struct Action
+    {
+        enum class Kind { None, Exit, CloseTab, CloseTile, SwitchLayout } kind = Kind::None;
+        Tile* tile = nullptr; // CloseTab, CloseTile
+        size_t tab = 0;       // CloseTab
+        std::string layout;   // SwitchLayout
+    };
     enum class SaveResult { Saved, Pending, Failed };
 
     // Every font/size the app draws with. All share one glyph atlas.
@@ -56,58 +62,68 @@ private:
     };
 
     void handleEvent(SDL_Event& event);
+    void handleMouse(const SDL_Event& event);
     bool handleShortcut(const SDL_KeyboardEvent& key);
     void runCommand(int command);
+    void afterTileEvent(Tile& tile); // outline jumps
 
-    void request(Action action); // asks about unsaved changes first
-    void perform(Action action);
-    SaveResult save();
+    // Unsaved changes: asks once about every modified document `action`
+    // would drop, saves the ones the user wants kept, then performs it.
+    void request(const Action& action);
+    void perform(const Action& action);
+    std::vector<std::shared_ptr<Document>> droppedDocuments(const Action& action) const;
+    void continueSaving(); // works through saveQueue_, then runs pending_
+    SaveResult save(const std::shared_ptr<Document>& document);
+    bool writeDocument(Document& document, const std::string& path);
 
     void showOpenDialog();
-    void showSaveDialog();
+    void showSaveDialog(const std::shared_ptr<Document>& document);
     static void SDLCALL onOpenDialog(void* userdata, const char* const* files, int filter);
     static void SDLCALL onSaveDialog(void* userdata, const char* const* files, int filter);
     void onDialogResult(const SDL_UserEvent& event);
 
+    // Documents and routing
     void newDocument();
-    bool loadFile(const char* path);
-    bool writeFile(const char* path);
-    bool modified() const;
-    std::string displayName() const;
-    void updateMeta(); // re-reads the ```meta block after edits (Markdown only)
+    void openPath(const std::string& path); // its tab if open, else a new tab in the editor used last
+    std::shared_ptr<Document> currentDocument() const;
     void showError(const std::string& message);
 
-    // Picks the workspace for the current file type: fonts, wrapping,
-    // gutter, and whether the Markdown preview is available.
-    void applyWorkspace();
-    void setPreview(bool preview);
-    void refreshPreview(); // after an edit made while previewing (checkbox, undo)
-    void documentChanged(); // new path or contents: reset per-document caches
-    void updateMenus();
+    // Tiles
+    std::unique_ptr<Workspace> makeWorkspace(WorkspaceType type);
+    std::unique_ptr<Tile> buildTile(const LayoutNode& node, std::vector<Tile*>& editors);
+    void applyLayout(const Layout& layout, const std::vector<std::shared_ptr<Document>>& documents,
+                     const std::shared_ptr<Document>& active);
+    void switchLayout(const std::string& name);
+    void saveLayoutAs(const std::string& name);
+    void focusTile(Tile* tile);
+    void updateFocus();
+    Tile* editorTile(bool create); // the editor tile used last (creating one if asked)
+    EditorWorkspace* targetEditor() const; // the focused editor, else the one used last
+    EditorWorkspace* focusedEditor() const;
+    TerminalWorkspace* focusedTerminal() const;
+    void toggleTile(WorkspaceType type);
+    void splitFocused(bool horizontal);
+    void removeTile(Tile* tile);
+    void closeTabNow(Tile* tile, size_t index);
+    void onPicked(int id, const std::string& choice);
+    // Every editor, hidden ones (stashed by a type change) too.
+    void forEachEditor(const std::function<void(Tile& tile, EditorWorkspace& editor, bool visible)>& fn) const;
+    void setTileType(Tile* tile, WorkspaceType type);
+    void openTypeMenu(Tile* tile, bool keyboard);
+    void endTileDrag(bool drop);
+    void followDocuments(); // preview and outline tiles show the current document
 
     // Settings (Documents/AtlasWriter/settings.ccl)
     void loadSettings();
     void applySettings();
     void checkSettingsFile();
     void openSettings();
-    EditorStyle codeStyle() const;
-    EditorStyle proseStyle() const;
-
-    // Workspace panels
-    SDL_FRect contentArea() const; // between the menu bar and the status bar
-    float minTerminalHeight() const;
-    bool outlineShown() const;
-    bool terminalShown() const;
-    void setTerminalVisible(bool visible);
-    void setTerminalFocus(bool focused);
-    void updateFocus();
-    void goToSourceLine(size_t line);
     void buildMenus();
-    std::string baseDirectory() const; // folder of the current file, with a trailing separator
-    bool previewing() const { return preview_ && fileType_.kind == FileKind::Markdown; }
+    void updateMenus();
 
     bool loadFonts();
     void applyFontSize();
+    SDL_FRect contentArea() const; // between the menu bar and the status bar
     void layout();
     void draw();
     void updateTitle();
@@ -118,28 +134,32 @@ private:
     SDL_Cursor* arrowCursor_ = nullptr;
     SDL_Cursor* textCursor_ = nullptr;
     SDL_Cursor* pointerCursor_ = nullptr;
-    SDL_Cursor* resizeCursor_ = nullptr;
+    SDL_Cursor* nsResizeCursor_ = nullptr;
+    SDL_Cursor* ewResizeCursor_ = nullptr;
+    SDL_Cursor* moveCursor_ = nullptr;
     SDL_Cursor* currentCursor_ = nullptr;
 
     std::array<Font, kFaceCount> fonts_;
     std::unique_ptr<GlyphAtlas> atlas_;
     std::unique_ptr<TextBatch> batch_;
     std::array<std::unique_ptr<TextRenderer>, kFaceCount> text_;
-    TextBuffer buffer_;
-    std::unique_ptr<EditorView> editor_;
-    std::unique_ptr<MarkdownView> markdown_;
     std::unique_ptr<ImageCache> images_;
-    std::unique_ptr<OutlinePanel> outline_;
-    std::unique_ptr<TerminalView> terminal_;
     std::unique_ptr<MenuBar> menu_;
+    std::unique_ptr<Picker> picker_;
+    std::unique_ptr<PopupMenu> typeMenu_;
+    Tile* typeMenuTile_ = nullptr; // whose type menu is open
 
-    // Current document
-    std::string path_; // empty for an unsaved new document
-    FileType fileType_;
-    uint64_t savedState_ = 0; // editor undo state at the last save (see EditorView::stateId)
-    bool crlf_ = false; // file used CRLF line endings; restored on save
-    bool bom_ = false;  // file started with a UTF-8 BOM; restored on save
-    bool preview_ = false; // Markdown: showing the rendered view
+    WorkspaceContext ctx_;
+    TileTree tiles_;
+    Tile* focused_ = nullptr;    // gets the keyboard
+    Tile* lastEditor_ = nullptr; // where files open; what previews and outlines follow
+    bool draggingDivider_ = false;
+    TileTree::Divider divider_;
+    // Dragging a tile by its header: pending until the pointer moves a few pixels.
+    enum class TileDrag { None, Pending, Moving } tileDrag_ = TileDrag::None;
+    Tile* dragTile_ = nullptr;
+    float dragStartX_ = 0.0f, dragStartY_ = 0.0f;
+    TileTree::Drop drop_;
 
     std::unique_ptr<Updater> updater_; // null if update checks are off
     Uint32 updateEvent_ = 0;           // an update is ready to apply
@@ -147,14 +167,11 @@ private:
     Uint32 imageEvent_ = 0;  // ... finished image decodes
     Uint32 terminalEvent_ = 0; // ... and terminal output
 
-    bool outlineVisible_ = false;
-    bool terminalVisible_ = false;
-    bool terminalFocused_ = false; // keyboard goes to the terminal
     bool windowFocused_ = true;
-    bool resizingTerminal_ = false;
-    float terminalHeight_ = 0.0f; // 0 = default share of the window
     bool dialogOpen_ = false;
-    Action pending_ = Action::None; // runs after a Save As dialog completes
+    std::shared_ptr<Document> dialogDocument_;           // being saved by the Save As dialog
+    std::deque<std::shared_ptr<Document>> saveQueue_;     // to save before pending_ runs
+    Action pending_;
 
     Settings settings_;
     std::string settingsPath_; // empty if there is nowhere to keep it
@@ -167,9 +184,4 @@ private:
     bool showAtlas_ = false;
     double lastFrameMs_ = 0.0;
     std::string title_;
-
-    md::Meta meta_;                     // the document's ```meta block
-    std::string metaSummary_;           // status bar: "#tag #tag · date · author"
-    uint64_t metaVersion_ = UINT64_MAX; // buffer version meta_ was read at
-    FileKind metaKind_ = FileKind::Code;
 };

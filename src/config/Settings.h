@@ -3,6 +3,7 @@
 #include "config/Ccl.h"
 #include "config/Commands.h"
 #include "config/Shortcut.h"
+#include "workspace/Layout.h"
 
 #include <SDL3/SDL.h>
 
@@ -35,6 +36,8 @@ struct Settings
     ModKey modKey = kDefaultModKey;
     bool updateCheck = true;      // look for a new version at startup
     std::vector<Binding> bindings;
+    std::string layout = "default"; // opened at startup
+    std::vector<Layout> layouts;    // built-in ones, then the user's
 
     // The CCL text of the defaults, written out as the initial settings file.
     static std::string defaultText();

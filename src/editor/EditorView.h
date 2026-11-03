@@ -4,6 +4,7 @@
 #include "editor/Syntax.h"
 #include "editor/UndoHistory.h"
 #include "text/TextRenderer.h"
+#include "workspace/Document.h"
 
 #include <SDL3/SDL.h>
 
@@ -11,7 +12,6 @@
 #include <string_view>
 #include <vector>
 
-class TextBuffer;
 class TextRenderer;
 
 // How an EditorView presents its text; each workspace picks its own.
@@ -30,10 +30,18 @@ struct EditorStyle
 // Everything is addressed in visual rows; without wrapping a row is a line.
 // Only the visible rows are laid out and drawn, so cost scales with the
 // window size, not the document size.
-class EditorView
+//
+// Several views can show one Document; each keeps its own caret, scroll
+// and wrapping, and follows edits made in the others.
+class EditorView : public DocumentListener
 {
 public:
-    explicit EditorView(TextBuffer& buffer);
+    explicit EditorView(Document& document);
+    ~EditorView();
+    EditorView(const EditorView&) = delete;
+    EditorView& operator=(const EditorView&) = delete;
+
+    Document& document() const { return doc_; }
 
     // Font and presentation. Keeps the caret; re-wraps on next use.
     void setStyle(TextRenderer& text, const EditorStyle& style);
@@ -45,7 +53,7 @@ public:
     bool handleEvent(const SDL_Event& event);
     void draw(SDL_Renderer* renderer);
 
-    void reset();       // call after the buffer's contents are replaced
+    void reset();       // caret to the top, scroll back (also on a document reload)
     void revealCaret(); // scroll so the caret is in view
 
     bool isOverText(float x, float y) const;
@@ -57,8 +65,8 @@ public:
     // false when there was nothing to do.
     bool undo();
     bool redo();
-    bool canUndo() const { return history_.canUndo(); }
-    bool canRedo() const { return history_.canRedo(); }
+    bool canUndo() const { return doc_.history().canUndo(); }
+    bool canRedo() const { return doc_.history().canRedo(); }
     void cut();
     void copy() const;
     void paste();
@@ -70,13 +78,6 @@ public:
     // selection stay on the same text instead of jumping to the edit.
     void replace(size_t pos, size_t length, std::string_view text);
 
-    // Identifies the document state for "unsaved changes" checks: compare
-    // with the value taken at save time (see UndoHistory::stateId()).
-    uint64_t stateId() const { return history_.stateId(); }
-    // Call on save, so the next keystroke starts a new undo step and undo
-    // can land exactly on the saved state.
-    void breakUndoGroup() { history_.breakGroup(); }
-
     // Syntax highlighting; null turns it off.
     void setLanguage(const syntax::Language* language);
     // Moves the caret to the start of `line` and scrolls it near the top.
@@ -86,6 +87,10 @@ public:
     void setCaretBlink(int ms) { blinkMs_ = static_cast<Uint64>(ms < 0 ? 0 : ms); } // 0 = steady
     // Milliseconds until the caret blink changes phase, or -1 if not blinking.
     Sint32 blinkTimeoutMs() const;
+
+    // DocumentListener: the text changed, from this view or another one.
+    void documentEdited(const DocumentEdit& edit) override;
+    void documentReset() override;
 
 private:
     // One visual row: a whole line, or a piece of a wrapped one.
@@ -139,13 +144,15 @@ private:
     float columnWidth() const; // wrap width
     long long visibleRows() const;
 
-    TextBuffer& buffer_;
+    UndoHistory& history() { return doc_.history(); }
+
+    Document& doc_;
+    const TextBuffer& buffer_;
     TextRenderer* text_ = nullptr;
     EditorStyle style_;
     SDL_FRect bounds_{};
 
     LineWrap wrap_;
-    UndoHistory history_;
     Highlighter highlighter_;
     std::vector<syntax::Span> spans_;              // tokens of the line being drawn
     std::vector<TextRenderer::ColorRun> colorRuns_;

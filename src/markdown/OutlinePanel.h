@@ -35,6 +35,7 @@ public:
 
     // Rescans if the buffer changed since the last call.
     void update(const TextBuffer& buffer);
+    void invalidate() { version_ = UINT64_MAX; } // now listing another buffer
     void setCurrentLine(size_t line);
 
     // Returns true if the panel needs a redraw. On a click on an entry,

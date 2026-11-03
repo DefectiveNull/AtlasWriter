@@ -14,6 +14,15 @@ The markdown functionality is in it's infancy and i have plans for things i want
 
 AtlasWriter also has support for viewing/editing code, it can detect when a code file is being open through it's file extension and use appropriate Syntax highlighting, it has a terminal window for easy access, and eventually it will have support for LSPs for common languages.
 
+## Tiles and layouts
+
+The window is split into tiles, in the style of the i3 window manager.
+- **What a tile shows:** one workspace, which is an editor, a rendered markdown preview, an outline of the headings, or a terminal. A tile can hold several tabs.
+- **Changing a tile:** the button at the left of its header switches what it shows, and switching back brings back what it had.
+- **Moving tiles with the mouse:** drag a tile by its header onto another tile to dock it beside that tile or swap the two.
+- **From the keyboard:** the Window menu and Alt+arrow keys split, focus, move and resize tiles.
+- **Saved layouts:** layouts live in `settings.ccl` under `layouts`. Window > Switch Layout... changes to one of them, and Window > Save Layout As... adds the current arrangement.
+
 ## And it's all driven by a novel and elegant configuration language
 
 As an experiment, AtlasWriter was built to try and make use of a configuration language made by Dimitrii Kovanikov in his article "The Most Elegant Configuration Language" in which he outlines how Category Theory can be used to structure data in the simplest possible way, while retaining a user friendly syntax. 

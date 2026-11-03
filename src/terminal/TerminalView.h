@@ -24,6 +24,9 @@ public:
     void setBounds(const SDL_FRect& bounds) { bounds_ = bounds; }
     const SDL_FRect& bounds() const { return bounds_; }
     float headerHeight() const;
+    // Off inside a tile, whose header already names it and closes it.
+    void setShowHeader(bool show) { showHeader_ = show; }
+    const std::string& shellName() const { return pty_.shellName(); }
 
     // Starts the shell if it isn't running.
     void ensureStarted(const std::string& directory);
@@ -67,6 +70,7 @@ private:
     std::string shell_;
     bool focused_ = false;
     bool exitedShown_ = false;
+    bool showHeader_ = true;
 
     float cellW_ = 1.0f, cellH_ = 1.0f;
     size_t viewOffset_ = 0; // lines scrolled back from the bottom

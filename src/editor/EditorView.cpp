@@ -32,12 +32,21 @@ CharClass classify(char c)
 
 } // namespace
 
-EditorView::EditorView(TextBuffer& buffer)
-    : buffer_(buffer)
-    , wrap_(buffer)
-    , highlighter_(buffer)
+EditorView::EditorView(Document& document)
+    : doc_(document)
+    , buffer_(document.buffer())
+    , wrap_(document.buffer())
+    , highlighter_(document.buffer())
 {
+    doc_.addListener(this);
     resetBlink();
+}
+
+EditorView::~EditorView()
+{
+    if (dragging_)
+        SDL_CaptureMouse(false);
+    doc_.removeListener(this);
 }
 
 void EditorView::setStyle(TextRenderer& text, const EditorStyle& style)
@@ -204,25 +213,35 @@ bool EditorView::handleKey(const SDL_KeyboardEvent& key)
 // Editing
 // ---------------------------------------------------------------------------
 
-// Every buffer change goes through here so the wrap index can re-wrap just
-// the lines that changed instead of the whole document.
+// Every buffer change goes through the document, which reports it to each
+// view (documentEdited), so this one and any other view of the file update.
 void EditorView::applyEdit(size_t pos, size_t length, std::string_view text)
 {
-    const bool layoutCurrent = !layoutDirty_ && layoutVersion_ == buffer_.version();
-    const size_t first = buffer_.lineOf(pos);
-    const size_t oldLast = buffer_.lineOf(pos + length);
+    doc_.applyEdit(pos, length, text);
+}
 
-    if (length > 0)
-        buffer_.erase(pos, length);
-    if (!text.empty())
-        buffer_.insert(pos, text);
-
-    highlighter_.linesChanged(first, oldLast - first + 1, buffer_.lineOf(pos + text.size()) - first + 1);
-    if (layoutCurrent) {
-        const size_t newLast = buffer_.lineOf(pos + text.size());
-        wrap_.update(first, oldLast - first + 1, newLast - first + 1);
+// The wrap index re-wraps just the lines that changed instead of the whole
+// document, and the caret and selection stay on the same text.
+void EditorView::documentEdited(const DocumentEdit& edit)
+{
+    highlighter_.linesChanged(edit.firstLine, edit.oldLines, edit.newLines);
+    if (!layoutDirty_ && layoutVersion_ == edit.versionBefore) {
+        wrap_.update(edit.firstLine, edit.oldLines, edit.newLines);
         layoutVersion_ = buffer_.version();
     }
+    // Positions after the edit shift with it; ones inside it move to its end.
+    const auto shift = [&](size_t p) {
+        if (p >= edit.pos + edit.removed)
+            return p - edit.removed + edit.inserted;
+        return p > edit.pos ? edit.pos + edit.inserted : p;
+    };
+    cursor_ = std::min(shift(cursor_), buffer_.size());
+    anchor_ = std::min(shift(anchor_), buffer_.size());
+}
+
+void EditorView::documentReset()
+{
+    reset();
 }
 
 // A user edit: applied, recorded for undo, caret placed after the new text.
@@ -233,7 +252,7 @@ void EditorView::edit(size_t pos, size_t length, std::string_view text, UndoHist
     applyEdit(pos, length, text);
     cursor_ = anchor_ = pos + text.size();
     desiredX_ = -1.0f;
-    history_.record(kind, {pos, std::move(removed), std::string(text)}, before, {cursor_, anchor_}, SDL_GetTicks());
+    history().record(kind, {pos, std::move(removed), std::string(text)}, before, {cursor_, anchor_}, SDL_GetTicks());
 }
 
 void EditorView::insert(std::string_view text, UndoHistory::Kind kind)
@@ -266,33 +285,24 @@ void EditorView::replace(size_t pos, size_t length, std::string_view text)
 {
     const UndoHistory::Selection before{cursor_, anchor_};
     std::string removed = buffer_.substr(pos, length);
-    applyEdit(pos, length, text);
+    applyEdit(pos, length, text); // documentEdited() keeps the caret on the same text
 
-    // Positions after the edit shift with it; ones inside it move to its end.
-    const auto shift = [&](size_t p) {
-        if (p >= pos + length)
-            return p - length + text.size();
-        return p > pos ? pos + text.size() : p;
-    };
-    cursor_ = shift(cursor_);
-    anchor_ = shift(anchor_);
-
-    history_.breakGroup();
-    history_.record(UndoHistory::Kind::Other, {pos, std::move(removed), std::string(text)}, before,
+    history().breakGroup();
+    history().record(UndoHistory::Kind::Other, {pos, std::move(removed), std::string(text)}, before,
                     {cursor_, anchor_}, SDL_GetTicks());
-    history_.breakGroup();
+    history().breakGroup();
 }
 
 bool EditorView::undo()
 {
-    if (!history_.canUndo())
+    if (!history().canUndo())
         return false;
-    const UndoHistory::Group& group = history_.peekUndo();
+    const UndoHistory::Group& group = history().peekUndo();
     for (auto it = group.edits.rbegin(); it != group.edits.rend(); ++it)
         applyEdit(it->pos, it->inserted.size(), it->removed);
     cursor_ = group.before.cursor;
     anchor_ = group.before.anchor;
-    history_.commitUndo();
+    history().commitUndo();
     desiredX_ = -1.0f;
     revealCaret();
     resetBlink();
@@ -301,14 +311,14 @@ bool EditorView::undo()
 
 bool EditorView::redo()
 {
-    if (!history_.canRedo())
+    if (!history().canRedo())
         return false;
-    const UndoHistory::Group& group = history_.peekRedo();
+    const UndoHistory::Group& group = history().peekRedo();
     for (const UndoHistory::Edit& e : group.edits)
         applyEdit(e.pos, e.removed.size(), e.inserted);
     cursor_ = group.after.cursor;
     anchor_ = group.after.anchor;
-    history_.commitRedo();
+    history().commitRedo();
     desiredX_ = -1.0f;
     revealCaret();
     resetBlink();
@@ -320,7 +330,7 @@ void EditorView::selectAll()
     anchor_ = 0;
     cursor_ = buffer_.size();
     desiredX_ = -1.0f;
-    history_.breakGroup();
+    history().breakGroup();
 }
 
 void EditorView::copy() const
@@ -360,7 +370,7 @@ void EditorView::moveTo(size_t pos, bool select)
     if (!select)
         anchor_ = pos;
     desiredX_ = -1.0f;
-    history_.breakGroup(); // typing after moving the caret is a new undo step
+    history().breakGroup(); // typing after moving the caret is a new undo step
 }
 
 void EditorView::moveVertical(long long rows, bool select)
@@ -639,7 +649,6 @@ void EditorView::reset()
     scrollX_ = scrollY_ = 0.0f;
     dragging_ = false;
     layoutDirty_ = true;
-    history_.clear();
     highlighter_.reset();
     resetBlink();
 }

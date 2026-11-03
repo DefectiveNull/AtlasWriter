@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(AtlasWriter VERSION 1.1.1 LANGUAGES C CXX)
+project(AtlasWriter VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -119,9 +119,21 @@ add_executable(AtlasWriter
     src/ui/Keys.h
     src/ui/MenuBar.cpp
     src/ui/MenuBar.h
+    src/ui/Picker.cpp
+    src/ui/Picker.h
+    src/ui/PopupMenu.cpp
+    src/ui/PopupMenu.h
     src/update/Sha256.h
     src/update/Updater.cpp
     src/update/Updater.h
+    src/workspace/Document.cpp
+    src/workspace/Document.h
+    src/workspace/Layout.cpp
+    src/workspace/Layout.h
+    src/workspace/TileTree.cpp
+    src/workspace/TileTree.h
+    src/workspace/Workspace.h
+    src/workspace/Workspaces.cpp
 )
 
 # A GUI executable: as a console one, Windows groups the console with the main

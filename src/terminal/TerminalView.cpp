@@ -70,6 +70,8 @@ TerminalView::TerminalView(TextRenderer& text, Uint32 eventType)
 
 float TerminalView::headerHeight() const
 {
+    if (!showHeader_)
+        return 0.0f;
     return std::round(static_cast<float>(text_.font().lineHeight()) * 1.6f);
 }
 
@@ -417,17 +419,20 @@ void TerminalView::draw(SDL_Renderer* renderer)
 
     ui::fillRect(renderer, bounds_, theme::kTerminalBg);
 
-    // Header: title, close button, separator line (also the resize handle).
-    ui::fillRect(renderer, {bounds_.x, bounds_.y, bounds_.w, header}, theme::kPanelBg);
-    ui::fillRect(renderer, {bounds_.x, bounds_.y, bounds_.w, 1.0f}, focused_ ? theme::kMenuActive : theme::kBorder);
-    std::string title = "TERMINAL";
-    if (!pty_.shellName().empty())
-        title += "  \xC2\xB7  " + pty_.shellName();
-    const float textY = bounds_.y + std::round((header - lh) * 0.5f);
-    text_.draw(bounds_.x + pad, textY, title, theme::kMuted);
-    const SDL_FRect close = closeButton();
-    text_.draw(std::round(close.x + (close.w - text_.advance(0xD7)) * 0.5f), textY, "\xC3\x97", theme::kMuted);
-    text_.flush();
+    if (header > 0.0f) {
+        // Header: title, close button, separator line (also the resize handle).
+        ui::fillRect(renderer, {bounds_.x, bounds_.y, bounds_.w, header}, theme::kPanelBg);
+        ui::fillRect(renderer, {bounds_.x, bounds_.y, bounds_.w, 1.0f},
+                     focused_ ? theme::kMenuActive : theme::kBorder);
+        std::string title = "TERMINAL";
+        if (!pty_.shellName().empty())
+            title += "  \xC2\xB7  " + pty_.shellName();
+        const float textY = bounds_.y + std::round((header - lh) * 0.5f);
+        text_.draw(bounds_.x + pad, textY, title, theme::kMuted);
+        const SDL_FRect close = closeButton();
+        text_.draw(std::round(close.x + (close.w - text_.advance(0xD7)) * 0.5f), textY, "\xC3\x97", theme::kMuted);
+        text_.flush();
+    }
 
     const float gridTop = bounds_.y + header;
     const float left = bounds_.x + pad;

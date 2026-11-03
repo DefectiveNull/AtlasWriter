@@ -49,6 +49,34 @@ updates =
   /= Look for a new version on GitHub each time AtlasWriter starts. It is
   /= downloaded in the background and applied when you close AtlasWriter.
   check = true
+
+/= The layout the window opens with (one of the names under layouts).
+layout = default
+
+layouts =
+  /= The window is a tree of tiles, like the i3 window manager. Each tile
+  /= shows one workspace type: editor, preview (rendered Markdown), outline
+  /= or terminal. "split = horizontal" puts a block's tiles side by side and
+  /= "split = vertical" stacks them. A size is a share of the block; tiles
+  /= without one share what is left. Repeat a type for two tiles of it, and
+  /= nest a block under any other name to split a tile again:
+  /=
+  /=   research =
+  /=     split = horizontal
+  /=     outline = 20%
+  /=     editor = 50%
+  /=     right =
+  /=       split = vertical
+  /=       preview = 70%
+  /=       terminal = 30%
+  /=
+  /= Window > Save Layout As... adds the current arrangement here.
+  default =
+    editor =
+  compare =
+    split = horizontal
+    editor = 50%
+    editor = 50%
 )";
 
 std::string_view trim(std::string_view s)
@@ -162,8 +190,8 @@ bool Settings::load(std::string_view text, Settings& out, std::vector<std::strin
             warnings.push_back("unknown section \"" + section + "\"");
             continue;
         }
-        if (section == "keys")
-            continue; // checked against the command list below
+        if (section == "keys" || section == "layout" || section == "layouts")
+            continue; // checked against the command list / by parseLayouts below
         for (const auto& [key, value] : entries.children()) {
             if (!known->find(key))
                 warnings.push_back("unknown setting \"" + section + " / " + key + "\"");
@@ -212,6 +240,22 @@ bool Settings::load(std::string_view text, Settings& out, std::vector<std::strin
                 warnings.push_back("keys / " + std::string(command.name) + ": can't read shortcut \"" + shortcutText
                                    + "\"");
         }
+    }
+
+    // Layouts: the built-in ones, then the user's (replacing same names).
+    {
+        std::vector<std::string> builtInWarnings; // none: the defaults are known good
+        parseLayouts(defaultText(), s.layouts, builtInWarnings);
+    }
+    parseLayouts(text, s.layouts, warnings);
+    const ccl::Config* chosenLayout = user.find("layout");
+    if (!chosenLayout)
+        chosenLayout = defaults.find("layout");
+    if (chosenLayout)
+        s.layout = std::string(trim(chosenLayout->value()));
+    if (!findLayout(s.layouts, s.layout)) {
+        warnings.push_back("layout: there is no layout named \"" + s.layout + "\"; using default");
+        s.layout = "default";
     }
 
     out = std::move(s);
