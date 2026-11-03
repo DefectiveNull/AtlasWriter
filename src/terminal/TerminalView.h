@@ -35,6 +35,9 @@ public:
     // Call on the pty's event: consumes output. Returns true if it changed.
     bool onOutput();
 
+    // Types text into the shell as if it were typed (a dropped path).
+    void sendText(std::string_view text) { send(text); }
+
     // Returns true if the view needs a redraw.
     bool handleEvent(const SDL_Event& event);
     void draw(SDL_Renderer* renderer);

@@ -88,6 +88,10 @@ add_executable(AtlasWriter
     src/editor/TextBuffer.h
     src/editor/UndoHistory.cpp
     src/editor/UndoHistory.h
+    src/embed/Embed.cpp
+    src/embed/Embed.h
+    src/embed/SessionAssets.cpp
+    src/embed/SessionAssets.h
     src/markdown/Html.cpp
     src/markdown/Html.h
     src/markdown/Markdown.cpp

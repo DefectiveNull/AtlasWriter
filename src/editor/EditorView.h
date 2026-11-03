@@ -77,6 +77,12 @@ public:
     // Markdown preview): one undo step of its own, and the caret and
     // selection stay on the same text instead of jumping to the edit.
     void replace(size_t pos, size_t length, std::string_view text);
+    // Inserts `text` at `pos` as one undo step and puts the caret after it
+    // (a drop).
+    void insertAt(size_t pos, std::string_view text);
+    // The text position under a point in the view (for drops).
+    size_t positionAt(float x, float y);
+    size_t caret() const { return cursor_; }
 
     // Syntax highlighting; null turns it off.
     void setLanguage(const syntax::Language* language);

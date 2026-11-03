@@ -111,6 +111,8 @@ private:
     void setTileType(Tile* tile, WorkspaceType type);
     void openTypeMenu(Tile* tile, bool keyboard);
     void endTileDrag(bool drop);
+    // Files and text dropped on the window, inserted once the drop completes.
+    void handleDrop(float x, float y);
     void followDocuments(); // preview and outline tiles show the current document
 
     // Settings (Documents/AtlasWriter/settings.ccl)
@@ -160,6 +162,12 @@ private:
     Tile* dragTile_ = nullptr;
     float dragStartX_ = 0.0f, dragStartY_ = 0.0f;
     TileTree::Drop drop_;
+    struct DroppedItem
+    {
+        bool file; // a path; else dropped text (a link from a browser, ...)
+        std::string data;
+    };
+    std::vector<DroppedItem> dropped_; // between DROP_BEGIN and DROP_COMPLETE
 
     std::unique_ptr<Updater> updater_; // null if update checks are off
     Uint32 updateEvent_ = 0;           // an update is ready to apply

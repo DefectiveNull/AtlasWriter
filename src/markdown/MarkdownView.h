@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -62,6 +63,11 @@ public:
     size_t topSourceLine();
     // Scrolls to a source line, expanding any collapsed heading hiding it.
     void revealSourceLine(size_t line);
+
+    // Where something dropped at screen height `y` goes: before this source
+    // line, the start of the block after the one under the pointer (after a
+    // collapsed section, not inside it). SIZE_MAX means at the end.
+    size_t dropLineAt(float y);
 
     // Over something that reacts to a click: a heading or a task checkbox.
     bool isOverClickable(float x, float y) const;
@@ -130,6 +136,13 @@ private:
     bool imageSize(const md::Span& span, float maxWidth, SDL_Texture*& texture, float& w, float& h);
     std::string resolveImage(const std::string& url) const;
 
+    // A link standing alone in its paragraph is drawn as a card: its text,
+    // then the address (websites) or the file's type and size.
+    static bool isCard(const md::Block& block);
+    void layoutCard(const md::Block& block, float left, float right, float& y);
+    std::string fileDetail(const std::string& url); // "PDF · 2.4 MB", read once per parse
+    static std::string fitText(const TextRenderer& text, std::string_view s, float maxWidth);
+
     void buildHeadingKeys();
     int headingAt(float x, float y) const; // index into headings_, or -1
     int taskAt(float x, float y) const;    // index into tasks_, or -1
@@ -152,6 +165,7 @@ private:
 
     std::vector<md::Block> blocks_;
     uint64_t version_ = UINT64_MAX;
+    std::unordered_map<std::string, std::string> fileDetails_; // card details by resolved path
 
     std::vector<std::string> headingKeys_; // per block; empty for non-headings
     std::unordered_set<std::string> collapsed_;

@@ -1,6 +1,7 @@
 #include "EditorView.h"
 
 #include "editor/TextBuffer.h"
+#include "embed/Embed.h"
 #include "text/Font.h"
 #include "text/TextRenderer.h"
 #include "text/Utf8.h"
@@ -293,6 +294,23 @@ void EditorView::replace(size_t pos, size_t length, std::string_view text)
     history().breakGroup();
 }
 
+void EditorView::insertAt(size_t pos, std::string_view text)
+{
+    pos = std::min(pos, buffer_.size());
+    history().breakGroup();
+    cursor_ = anchor_ = pos;
+    edit(pos, 0, text, UndoHistory::Kind::Other);
+    history().breakGroup();
+    revealCaret();
+    resetBlink();
+}
+
+size_t EditorView::positionAt(float x, float y)
+{
+    ensureLayout();
+    return offsetAt(x, y);
+}
+
 bool EditorView::undo()
 {
     if (!history().canUndo())
@@ -354,8 +372,12 @@ void EditorView::paste()
     char* clipboard = SDL_GetClipboardText();
     if (!clipboard)
         return;
-    const std::string text = normalizeNewlines(clipboard);
+    std::string text = normalizeNewlines(clipboard);
     SDL_free(clipboard);
+    // A lone web address becomes a link, [example.com/page](https://...),
+    // except in code.
+    if (doc_.type().kind != FileKind::Code && embed::isUrl(text))
+        text = embed::urlLink(text);
     if (!text.empty())
         insert(text, UndoHistory::Kind::Other);
 }

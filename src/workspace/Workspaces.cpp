@@ -19,7 +19,7 @@ void EditorWorkspace::sync(Tab& tab)
 {
     const Document& doc = *tab.doc;
     const FileType& type = doc.type();
-    if (tab.styled && tab.kind == type.kind && tab.typeName == type.name && tab.directory == doc.directory())
+    if (tab.styled && tab.kind == type.kind && tab.typeName == type.name && tab.directory == doc.assetBase())
         return;
     const bool code = type.kind == FileKind::Code;
     tab.editor->setLanguage(code ? syntax::languageFor(type.name) : nullptr);
@@ -28,13 +28,13 @@ void EditorWorkspace::sync(Tab& tab)
     else
         tab.editor->setStyle(*ctx_.reading, ctx_.proseStyle);
     tab.editor->setCaretBlink(ctx_.caretBlinkMs);
-    if (!tab.styled || tab.directory != doc.directory())
-        tab.markdown->setImages(ctx_.images, doc.directory(), ctx_.displayScale); // also re-lays out
+    if (!tab.styled || tab.directory != doc.assetBase())
+        tab.markdown->setImages(ctx_.images, doc.assetBase(), ctx_.displayScale); // also re-lays out
     if (type.kind != FileKind::Markdown)
         tab.preview = false;
     tab.kind = type.kind;
     tab.typeName = type.name;
-    tab.directory = doc.directory();
+    tab.directory = doc.assetBase();
     tab.styled = true;
 }
 
@@ -183,6 +183,35 @@ void EditorWorkspace::closeTab(size_t index)
     selectTab(active_);
 }
 
+namespace {
+
+// The offset where source line `line` starts; the end for SIZE_MAX or past the last line.
+size_t lineOffset(const TextBuffer& buffer, size_t line)
+{
+    return line < buffer.lineCount() ? buffer.lineStart(line) : buffer.size();
+}
+
+} // namespace
+
+size_t EditorWorkspace::dropPosition(float x, float y)
+{
+    Tab& tab = *tabs_[active_];
+    sync(tab);
+    if (previewing())
+        return lineOffset(tab.doc->buffer(), tab.markdown->dropLineAt(y));
+    return tab.editor->positionAt(x, y);
+}
+
+void EditorWorkspace::insertDropped(size_t pos, std::string_view text)
+{
+    if (previewing()) {
+        editor().replace(pos, 0, text); // the caret stays where it was
+        refreshPreview();
+    } else {
+        editor().insertAt(pos, text);
+    }
+}
+
 void EditorWorkspace::setPreview(bool preview)
 {
     Tab& tab = *tabs_[active_];
@@ -255,8 +284,8 @@ void PreviewWorkspace::sync()
             view_.setSource({}, 0);
         return;
     }
-    if (!styled_ || directory_ != doc->directory()) {
-        directory_ = doc->directory();
+    if (!styled_ || directory_ != doc->assetBase()) {
+        directory_ = doc->assetBase();
         view_.setImages(ctx_.images, directory_, ctx_.displayScale);
         styled_ = true;
     }
@@ -302,6 +331,21 @@ std::string PreviewWorkspace::status()
 {
     const std::shared_ptr<Document> doc = doc_.lock();
     return doc ? "Preview of " + doc->displayName() : "Preview";
+}
+
+size_t PreviewWorkspace::dropPosition(float, float y)
+{
+    sync();
+    const std::shared_ptr<Document> doc = doc_.lock();
+    return doc ? lineOffset(doc->buffer(), view_.dropLineAt(y)) : 0;
+}
+
+void PreviewWorkspace::insertDropped(size_t pos, std::string_view text)
+{
+    if (const std::shared_ptr<Document> doc = doc_.lock()) {
+        doc->edit(std::min(pos, doc->buffer().size()), 0, text);
+        sync();
+    }
 }
 
 std::string PreviewWorkspace::tabTitle(size_t) const
@@ -466,6 +510,12 @@ bool TerminalWorkspace::onOutput()
         changed |= c && i == active_;
     }
     return changed;
+}
+
+void TerminalWorkspace::typeText(const std::string& text)
+{
+    if (!shells_.empty())
+        shells_[active_].view->sendText(text);
 }
 
 bool TerminalWorkspace::hasKeyboard() const

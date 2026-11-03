@@ -50,6 +50,8 @@ public:
     // Records an edit already applied to the buffer. `before`/`after` are the
     // selections around it.
     void record(Kind kind, Edit edit, Selection before, Selection after, uint64_t nowMs);
+    // Several edits, already applied in order, as one step of their own.
+    void recordGroup(std::vector<Edit> edits, Selection before, Selection after, uint64_t nowMs);
 
     // Stops the current group from absorbing further edits (e.g. the caret
     // moved), so the next edit starts a new undo step.

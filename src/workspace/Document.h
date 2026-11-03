@@ -74,6 +74,12 @@ public:
     bool pristine() const { return path_.empty() && buffer_.size() == 0 && !history_.canUndo(); }
     std::string displayName() const; // file name, or "Untitled"
     std::string directory() const;   // folder with a trailing separator; empty if untitled
+    // Where files dropped into the document are kept (assets/ goes inside
+    // it): its folder, or a session folder until it is first saved.
+    std::string assetBase() const;
+    // Several edits as one undo step, each applied in order (positions as
+    // of the text at that point).
+    void editGroup(const std::vector<UndoHistory::Edit>& edits);
     std::string title() const;       // the meta block's title, else displayName()
 
     // The ```meta block at the top of a Markdown file, re-read after edits.
@@ -88,6 +94,8 @@ private:
     std::vector<DocumentListener*> listeners_;
 
     std::string path_; // empty for an unsaved new document
+    uint64_t id_ = nextId(); // names its session folder while unsaved
+    static uint64_t nextId();
     FileType type_;
     uint64_t savedState_ = 0; // history state at the last save
     bool crlf_ = false;

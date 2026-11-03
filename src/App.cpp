@@ -8,6 +8,8 @@
 #include "ui/MenuBar.h"
 #include "ui/Picker.h"
 #include "ui/PopupMenu.h"
+#include "embed/Embed.h"
+#include "embed/SessionAssets.h"
 #include "update/Updater.h"
 
 #include <nanosvg.h>
@@ -143,6 +145,7 @@ App::~App()
     std::unique_ptr<TileTree::Node> root = tiles_.takeRoot(); // stops shells, frees views
     root.reset();
     images_.reset(); // joins the decode thread, frees textures
+    session::cleanup(); // files dropped into documents that were never saved
     typeMenu_.reset();
     picker_.reset();
     menu_.reset();
@@ -240,6 +243,7 @@ bool App::init(int argc, char* argv[])
         Settings::load(Settings::defaultText(), settings_, ignored, error);
     }
     settingsPath_ = findSettingsPath();
+    session::sweep(); // left behind by runs that crashed
     applySettings();
     loadSettings();
     SDL_StartTextInput(window_);
@@ -398,6 +402,19 @@ void App::handleEvent(SDL_Event& event)
             return;
         }
         break;
+    case SDL_EVENT_DROP_BEGIN:
+        dropped_.clear();
+        return;
+    case SDL_EVENT_DROP_FILE:
+    case SDL_EVENT_DROP_TEXT:
+        if (event.drop.data)
+            dropped_.push_back({event.type == SDL_EVENT_DROP_FILE, event.drop.data});
+        return;
+    case SDL_EVENT_DROP_POSITION:
+        return;
+    case SDL_EVENT_DROP_COMPLETE:
+        handleDrop(event.drop.x, event.drop.y);
+        return;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         if (tileDrag_ != TileDrag::None) { // another button cancels the drag
             endTileDrag(false);
@@ -941,11 +958,29 @@ App::SaveResult App::save(const std::shared_ptr<Document>& document)
 
 bool App::writeDocument(Document& document, const std::string& path)
 {
+    // Files dropped into the document come along to its new folder (Save
+    // As, or the first save out of the session folder). One that clashes
+    // with a different file there is renamed, and so are its links.
+    const std::string oldBase = document.assetBase();
+    const size_t slash = path.find_last_of("/\\");
+    const std::string newBase = slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+    const bool firstSave = document.path().empty();
+    if (!samePath(oldBase, newBase)) {
+        const std::vector<embed::Rename> renames =
+            embed::transferAssets(document.buffer().toString(), oldBase, newBase);
+        std::vector<UndoHistory::Edit> edits;
+        for (const embed::Rename& r : renames)
+            edits.push_back({r.pos, document.buffer().substr(r.pos, r.length), r.target});
+        document.editGroup(edits); // last position first, so each offset still holds
+    }
+
     std::string error;
     if (!document.save(path, error)) {
         showError("Could not save \"" + path + "\":\n" + error);
         return false;
     }
+    if (firstSave)
+        session::remove(oldBase); // its files are beside the document now
     if (samePath(path, settingsPath_))
         loadSettings(); // saving settings.ccl applies it
     dirty_ = true;
@@ -1422,6 +1457,139 @@ void App::endTileDrag(bool drop)
     }
     focusTile(moved);
     layout();
+}
+
+// A drop goes to the tile under the pointer: into its document as embeds
+// (files copied beside it), or, on a terminal, as quoted paths typed into
+// the shell. Tiles with no document hand it to the editor used last, at
+// its caret.
+void App::handleDrop(float x, float y)
+{
+    std::vector<DroppedItem> items = std::move(dropped_);
+    dropped_.clear();
+    if (items.empty() || dialogOpen_)
+        return;
+
+    // Dropped text from a browser is often a URI list: one address per
+    // line, '#' lines being comments. Local files in it count as files.
+    std::vector<DroppedItem> expanded;
+    for (DroppedItem& item : items) {
+        if (item.file) {
+            expanded.push_back(std::move(item));
+            continue;
+        }
+        std::vector<std::string> lines;
+        bool allLinks = true;
+        size_t start = 0;
+        while (start <= item.data.size()) {
+            size_t end = item.data.find('\n', start);
+            if (end == std::string::npos)
+                end = item.data.size();
+            std::string line = item.data.substr(start, end - start);
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+                line.pop_back();
+            start = end + 1;
+            if (line.empty() || line[0] == '#')
+                continue;
+            allLinks = allLinks && (embed::isUrl(line) || line.rfind("file://", 0) == 0);
+            lines.push_back(std::move(line));
+        }
+        if (!allLinks || lines.empty()) {
+            expanded.push_back({false, item.data}); // plain text: inserted as it is
+            continue;
+        }
+        for (std::string& line : lines) {
+            if (line.rfind("file://", 0) == 0) {
+                std::string path = embed::decodeLinkPath(line.substr(7));
+                if (path.size() > 2 && path[0] == '/' && path[2] == ':')
+                    path.erase(0, 1); // file:///C:/...
+                expanded.push_back({true, std::move(path)});
+            } else {
+                expanded.push_back({false, std::move(line)});
+            }
+        }
+    }
+
+    Tile* tile = tiles_.tileAt(x, y);
+    if (tile && tile->workspace->type() == WorkspaceType::Terminal) {
+        std::string text;
+        for (const DroppedItem& item : expanded) {
+            if (!text.empty())
+                text += ' ';
+            text += item.file ? "\"" + item.data + "\"" : item.data;
+        }
+        static_cast<TerminalWorkspace&>(*tile->workspace).typeText(text);
+        focusTile(tile);
+        dirty_ = true;
+        return;
+    }
+
+    Workspace* target = tile ? tile->workspace.get() : nullptr;
+    Document* doc = target ? target->dropDocument() : nullptr;
+    size_t pos = 0;
+    if (doc) {
+        pos = target->dropPosition(x, y);
+    } else {
+        Tile* editorTileNode = editorTile(true);
+        auto& editor = static_cast<EditorWorkspace&>(*editorTileNode->workspace);
+        target = &editor;
+        doc = &editor.document();
+        pos = editor.editor().caret();
+        tile = editorTileNode;
+    }
+    pos = std::min(pos, doc->buffer().size());
+
+    // Writing (Markdown, plain text, a new Untitled) gets embeds; code gets
+    // the plain paths and text.
+    std::vector<std::string> pieces;
+    std::string errors;
+    bool embeds = false;
+    for (const DroppedItem& item : expanded) {
+        if (doc->type().kind == FileKind::Code) {
+            pieces.push_back(item.data);
+            continue;
+        }
+        if (!item.file) {
+            if (embed::isUrl(item.data)) {
+                pieces.push_back(embed::urlLink(item.data));
+                embeds = true;
+            } else {
+                pieces.push_back(item.data);
+            }
+            continue;
+        }
+        SDL_PathInfo info{};
+        if (!SDL_GetPathInfo(item.data.c_str(), &info) || info.type != SDL_PATHTYPE_FILE)
+            continue; // folders can't be embedded
+        std::string link, error;
+        if (!embed::placeFile(item.data, doc->assetBase(), link, error)) {
+            errors += (errors.empty() ? "" : "\n") + error;
+            continue;
+        }
+        pieces.push_back(embed::fileLink(embed::fileName(item.data), link, embed::isImage(item.data)));
+        embeds = true;
+    }
+    if (!errors.empty())
+        showError(errors);
+    if (pieces.empty())
+        return;
+
+    std::string text;
+    for (const std::string& piece : pieces) {
+        if (!text.empty())
+            text += embeds ? "\n\n" : "\n";
+        text += piece;
+    }
+    if (embeds) {
+        // Each embed is a paragraph of its own, so it shows as a card or image.
+        const TextBuffer& buffer = doc->buffer();
+        const size_t from = pos >= 2 ? pos - 2 : 0;
+        text = embed::asBlock(buffer.substr(from, pos - from), buffer.substr(pos, std::min<size_t>(2, buffer.size() - pos)),
+                              text);
+    }
+    target->insertDropped(pos, text);
+    focusTile(tile);
+    dirty_ = true;
 }
 
 void App::removeTile(Tile* tile)

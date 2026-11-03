@@ -1,5 +1,6 @@
 #include "Document.h"
 
+#include "embed/SessionAssets.h"
 #include "markdown/FileMeta.h"
 
 #include <SDL3/SDL.h>
@@ -139,6 +140,29 @@ std::string Document::directory() const
 {
     const size_t slash = path_.find_last_of("/\\");
     return slash == std::string::npos ? std::string() : path_.substr(0, slash + 1);
+}
+
+uint64_t Document::nextId()
+{
+    static uint64_t next = 1;
+    return next++;
+}
+
+std::string Document::assetBase() const
+{
+    return path_.empty() ? session::folderFor(id_) : directory();
+}
+
+void Document::editGroup(const std::vector<UndoHistory::Edit>& edits)
+{
+    if (edits.empty())
+        return;
+    for (const UndoHistory::Edit& e : edits)
+        applyEdit(e.pos, e.removed.size(), e.inserted);
+    const UndoHistory::Selection caret{edits.back().pos, edits.back().pos};
+    history_.breakGroup();
+    history_.recordGroup(edits, caret, caret, SDL_GetTicks());
+    history_.breakGroup();
 }
 
 std::string Document::title() const

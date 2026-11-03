@@ -74,6 +74,7 @@ void MarkdownView::setImages(ImageCache* images, std::string baseDirectory, floa
     images_ = images;
     baseDirectory_ = std::move(baseDirectory);
     imageScale_ = scale;
+    fileDetails_.clear();
     invalidateLayout();
 }
 
@@ -82,6 +83,7 @@ void MarkdownView::setSource(std::string_view text, uint64_t version)
     if (version == version_)
         return;
     version_ = version;
+    fileDetails_.clear(); // files may have changed too; read them again
     blocks_ = md::parse(text);
     buildHeadingKeys();
     invalidateLayout();
@@ -186,6 +188,34 @@ size_t MarkdownView::topSourceLine()
             return line.sourceLine;
     }
     return lines_.empty() ? 0 : lines_.back().sourceLine;
+}
+
+size_t MarkdownView::dropLineAt(float y)
+{
+    ensureLayout();
+    if (blocks_.empty())
+        return SIZE_MAX;
+    const float docY = y - bounds_.y + std::round(scrollY_);
+    if (lines_.empty() || docY >= contentHeight_)
+        return SIZE_MAX;
+    // The last line starting at or above the pointer, and its block.
+    auto it = std::partition_point(lines_.begin(), lines_.end(), [&](const Line& line) { return line.y <= docY; });
+    if (it == lines_.begin())
+        return blocks_.front().sourceLine; // above everything: before the first block
+    const size_t line = std::prev(it)->sourceLine;
+    size_t block = 0;
+    for (size_t i = 0; i < blocks_.size() && blocks_[i].sourceLine <= line; ++i)
+        block = i;
+    size_t next = block + 1;
+    // A collapsed heading hides what follows it: go past that, so the drop
+    // stays in view.
+    const md::Block& b = blocks_[block];
+    if (b.type == md::BlockType::Heading && collapsed_.count(headingKeys_[block]) != 0) {
+        while (next < blocks_.size()
+               && !(blocks_[next].type == md::BlockType::Heading && blocks_[next].level <= b.level))
+            ++next;
+    }
+    return next < blocks_.size() ? blocks_[next].sourceLine : SIZE_MAX;
 }
 
 void MarkdownView::revealSourceLine(size_t sourceLine)
@@ -429,7 +459,10 @@ void MarkdownView::layoutBlock(const md::Block& block, const md::Block* next, fl
     }
 
     case md::BlockType::Paragraph:
-        flow(block, left, right, y, kBodySpacing);
+        if (isCard(block))
+            layoutCard(block, left, right, y);
+        else
+            flow(block, left, right, y, kBodySpacing);
         y += gap;
         break;
 
@@ -646,6 +679,126 @@ void MarkdownView::finishLine(Line& line, float& y, float spacing, TextRenderer*
     y += line.height;
     maxLineHeight_ = std::max(maxLineHeight_, line.height);
     lines_.push_back(std::move(line));
+}
+
+// ---------------------------------------------------------------------------
+// Link cards
+// ---------------------------------------------------------------------------
+
+bool MarkdownView::isCard(const md::Block& block)
+{
+    const std::string* url = nullptr;
+    for (const md::Span& span : block.spans) {
+        const bool blank = span.text.find_first_not_of(" \t") == std::string::npos;
+        if (!(span.style & md::kLink) || (span.style & md::kImage)) {
+            if (blank && !(span.style & md::kImage))
+                continue; // spaces around the link
+            return false;
+        }
+        if (span.url.empty() || (url && *url != span.url))
+            return false;
+        url = &span.url;
+    }
+    return url != nullptr;
+}
+
+std::string MarkdownView::fileDetail(const std::string& url)
+{
+    const std::string path = resolveImage(url);
+    if (path.empty())
+        return {};
+    if (auto it = fileDetails_.find(path); it != fileDetails_.end())
+        return it->second;
+
+    std::string detail;
+    SDL_PathInfo info{};
+    if (!SDL_GetPathInfo(path.c_str(), &info)) {
+        detail = "File not found";
+    } else if (info.type == SDL_PATHTYPE_DIRECTORY) {
+        detail = "Folder";
+    } else {
+        const size_t slash = path.find_last_of("/\\");
+        const size_t dot = path.find_last_of('.');
+        std::string type = "File";
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash + 1)) {
+            type = path.substr(dot + 1);
+            for (char& c : type)
+                c = static_cast<char>(SDL_toupper(static_cast<unsigned char>(c)));
+        }
+        char size[32];
+        const double bytes = static_cast<double>(info.size);
+        if (info.size < 1024)
+            SDL_snprintf(size, sizeof(size), "%llu bytes", static_cast<unsigned long long>(info.size));
+        else if (bytes < 1024.0 * 1024.0)
+            SDL_snprintf(size, sizeof(size), "%.1f KB", bytes / 1024.0);
+        else if (bytes < 1024.0 * 1024.0 * 1024.0)
+            SDL_snprintf(size, sizeof(size), "%.1f MB", bytes / (1024.0 * 1024.0));
+        else
+            SDL_snprintf(size, sizeof(size), "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+        detail = type + " \xC2\xB7 " + size; // middle dot
+    }
+    fileDetails_.emplace(path, detail);
+    return detail;
+}
+
+std::string MarkdownView::fitText(const TextRenderer& text, std::string_view s, float maxWidth)
+{
+    if (text.measure(s) <= maxWidth)
+        return std::string(s);
+    std::string out(s);
+    while (!out.empty()) {
+        // Drop one codepoint (and any UTF-8 continuation bytes).
+        do
+            out.pop_back();
+        while (!out.empty() && (static_cast<unsigned char>(out.back()) & 0xC0) == 0x80);
+        if (text.measure(out + "...") <= maxWidth)
+            break;
+    }
+    return out + "...";
+}
+
+void MarkdownView::layoutCard(const md::Block& block, float left, float right, float& y)
+{
+    std::string label, url;
+    for (const md::Span& span : block.spans) {
+        if (span.style & md::kLink) {
+            label += span.text;
+            url = span.url;
+        }
+    }
+    const bool web = url.find("://") != std::string::npos && url.rfind("file://", 0) != 0;
+    const std::string detail = web ? url : fileDetail(url);
+
+    TextRenderer* title = fonts_.regular;
+    TextRenderer* small = fonts_.code;
+    const float pad = std::round(em() * 0.7f);
+    const float accent = std::max(2.0f, std::round(em() * 0.18f));
+    const float width = std::min(right - left, std::round(em() * 30.0f));
+    const float textLeft = left + accent + pad;
+    const float textWidth = std::max(0.0f, width - accent - 2.0f * pad);
+    const float top = y;
+    y += std::round(pad * 0.7f);
+
+    Line first;
+    first.sourceLine = block.sourceLine;
+    std::string shown = fitText(*title, label.empty() ? url : label, textWidth);
+    first.runs.push_back({title, textLeft, title->measure(shown), std::move(shown), theme::kHeading, 0, false});
+    finishLine(first, y, kBodySpacing, title);
+
+    if (!detail.empty()) {
+        Line second;
+        second.sourceLine = block.sourceLine;
+        std::string text = fitText(*small, detail, textWidth);
+        second.runs.push_back({small, textLeft, small->measure(text), std::move(text), theme::kMuted, 0, false});
+        finishLine(second, y, 1.3f, small);
+    }
+    y += std::round(pad * 0.7f);
+
+    const float h = y - top;
+    boxes_.push_back({{left, top, width, h}, theme::kBorder});
+    boxes_.push_back({{left + 1.0f, top + 1.0f, width - 2.0f, h - 2.0f}, theme::kEditorBg});
+    boxes_.push_back({{left + 1.0f, top + 1.0f, width - 2.0f, h - 2.0f}, theme::kCodeBg});
+    boxes_.push_back({{left + 1.0f, top + 1.0f, accent, h - 2.0f}, web ? theme::kLink : theme::kMenuActive});
 }
 
 // ---------------------------------------------------------------------------

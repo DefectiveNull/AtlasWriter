@@ -63,6 +63,17 @@ void UndoHistory::record(Kind kind, Edit edit, Selection before, Selection after
     mergeable_ = true;
 }
 
+void UndoHistory::recordGroup(std::vector<Edit> edits, Selection before, Selection after, uint64_t nowMs)
+{
+    if (edits.empty())
+        return;
+    redo_.clear();
+    undo_.push_back({std::move(edits), before, after, Kind::Other, nowMs, nextId_++});
+    if (undo_.size() > kMaxGroups)
+        undo_.erase(undo_.begin());
+    mergeable_ = false;
+}
+
 void UndoHistory::commitUndo()
 {
     redo_.push_back(std::move(undo_.back()));

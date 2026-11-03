@@ -67,6 +67,13 @@ public:
     // changes first). The tile closes once its last tab is gone.
     virtual void closeTab(size_t) {}
 
+    // Drops: the document a file or link dropped on this tile goes into
+    // (null: none), where at the point (x, y), and the insertion itself,
+    // as one undo step.
+    virtual Document* dropDocument() { return nullptr; }
+    virtual size_t dropPosition(float, float) { return 0; }
+    virtual void insertDropped(size_t, std::string_view) {}
+
 protected:
     const WorkspaceContext& ctx_;
 };
@@ -94,6 +101,11 @@ public:
     std::string tabTitle(size_t index) const override;
     bool tabModified(size_t index) const override;
     void closeTab(size_t index) override;
+
+    // Source view: at the point. Rendered view: after the block there.
+    Document* dropDocument() override { return &document(); }
+    size_t dropPosition(float x, float y) override;
+    void insertDropped(size_t pos, std::string_view text) override;
 
     // Shows `document`: its tab if there is one, else a new tab after the
     // current one (or in place of an untouched Untitled tab).
@@ -152,6 +164,10 @@ public:
     void imagesLoaded() override { view_.invalidateLayout(); }
     std::string status() override;
     std::string tabTitle(size_t) const override;
+
+    Document* dropDocument() override { return doc_.lock().get(); } // editors keep it alive
+    size_t dropPosition(float x, float y) override;
+    void insertDropped(size_t pos, std::string_view text) override;
 
     void follow(const std::shared_ptr<Document>& document);
     const std::shared_ptr<Document> document() const { return doc_.lock(); }
@@ -213,6 +229,8 @@ public:
     void closeTab(size_t index) override;
 
     void addShell(std::string directory);
+    // Types `text` into the current shell (a dropped file's path).
+    void typeText(const std::string& text);
     bool onOutput(); // the pty event: true if a visible screen changed
     bool hasKeyboard() const;
 
