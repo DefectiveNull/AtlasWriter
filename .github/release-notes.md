@@ -1,26 +1,13 @@
-The first release of AtlasWriter, a minimalist text editor for the thinking mind.
+AtlasWriter 1.1 makes to-do lists usable from the rendered view.
 
-## Features
+## What's new
 
 **Markdown**
-- Switch between source and rendered views with Ctrl+E
-- Soft wrap and a readable centered column
-- Heading outline with collapsing
-- Images in the rendered view
+- Click a to-do item's checkbox in the rendered view (Ctrl+E) to tick or untick it. AtlasWriter writes `x` or a space into the file, and the caret in the source stays where it was.
+- Undo and redo now work in the rendered view too, so an accidental click can be reverted without switching back to the source.
+- Checkboxes written as HTML (`<input type="checkbox">`) still show but can't be clicked.
 
-**Code**
-- Syntax highlighting chosen by file extension
-- Line numbers and current line highlight
-- Built-in terminal (Ctrl+J)
-
-**Configuration**
-- Everything lives in `Documents/AtlasWriter/settings.ccl`, written in the Categorical Configuration Language
-- Changes apply as soon as you save the file
-- Custom shortcuts, and a Mod key you can set to Ctrl, Shift or Super
-
-**Updates**
-- AtlasWriter checks for a new version when it starts, downloads it in the background and applies it when you close the app
-- Set `check = false` under `updates` in `settings.ccl` to turn this off
+If you already have 1.0.0, AtlasWriter updates itself the next time you start and close it.
 
 ## Install
 
